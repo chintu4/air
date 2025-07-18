@@ -1,0 +1,57 @@
+# RUAI Configuration File
+# This file contains settings for the AI Agent
+
+[local_model]
+# Path to your local GGUF model file
+model_path = "C:\\models\\tinyllama-1.1b-chat-v1.0.Q2_K.gguf"
+max_tokens = 512
+temperature = 0.7
+context_length = 2048
+# Number of CPU threads to use (0 = auto-detect)
+threads = 0
+
+# [[cloud_providers]]
+# name = "openai"
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-3.5-turbo"
+# max_tokens = 1000
+# temperature = 0.7
+# timeout_seconds = 30
+# # API key can be set via environment variable OPENAI_API_KEY
+
+# [[cloud_providers]]
+# name = "anthropic"
+# base_url = "https://api.anthropic.com"
+# model = "claude-3-haiku-20240307"
+# max_tokens = 1000
+# temperature = 0.7
+# timeout_seconds = 30
+# # API key can be set via environment variable ANTHROPIC_API_KEY
+
+[[cloud_providers]]
+name = "gemini"
+base_url = "https://generativelanguage.googleapis.com"
+model = "gemini-1.5-flash"
+max_tokens = 1000
+temperature = 0.7
+timeout_seconds = 30
+# API key can be set via environment variable GEMINI_KEY
+
+[[cloud_providers]]
+name = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+model = "anthropic/claude-3.5-haiku"
+max_tokens = 1000
+temperature = 0.7
+timeout_seconds = 30
+# API key can be set via environment variable OPEN_ROUTER
+
+[performance]
+# How long to wait for local model before fallback (seconds)
+local_timeout_seconds = 10
+# Threshold for considering local response "fast enough" (milliseconds)
+fallback_threshold_ms = 3000
+# Minimum quality score to avoid cloud fallback (0.0-1.0)
+quality_threshold = 0.8
+# Whether to prefer local model for simple queries
+prefer_local_for_simple_queries = true
