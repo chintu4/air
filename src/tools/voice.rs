@@ -42,26 +42,15 @@ impl VoiceTool {
         let filename = self.generate_filename("speech", "wav");
         let filepath = Path::new(&self.output_dir).join(&filename);
         
-        let result = if cfg!(target_os = "windows") {
-            self.windows_text_to_speech(text, &filepath, voice).await
-        } else if cfg!(target_os = "macos") {
+        let result = {
+            #[cfg(target_os = "windows")]
+            { self.windows_text_to_speech(text, &filepath, voice).await }
             #[cfg(target_os = "macos")]
-            {
-                self.macos_text_to_speech(text, &filepath, voice).await
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err(anyhow!("macOS TTS not supported on this platform"))
-            }
-        } else {
+            { self.macos_text_to_speech(text, &filepath, voice).await }
             #[cfg(target_os = "linux")]
-            {
-                self.linux_text_to_speech(text, &filepath, voice).await
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(anyhow!("Linux TTS not supported on this platform"))
-            }
+            { self.linux_text_to_speech(text, &filepath, voice).await }
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            { Err(anyhow!("Unsupported OS for text-to-speech")) }
         };
         
         match result {
@@ -138,7 +127,7 @@ impl VoiceTool {
             cmd.args(["-v", v]);
         }
         
-        cmd.args(["-o", &filepath.to_string_lossy(), text]);
+        cmd.args(["-o", &*filepath.to_string_lossy(), text]);
         
         let output = cmd.output()?;
         
@@ -153,10 +142,11 @@ impl VoiceTool {
     #[cfg(target_os = "linux")]
     async fn linux_text_to_speech(&self, text: &str, filepath: &Path, voice: Option<&str>) -> Result<()> {
         // Try different TTS engines available on Linux
+        let filepath_str = filepath.to_string_lossy();
         let tools = vec![
-            ("espeak", vec!["-w", &filepath.to_string_lossy(), text]),
+            ("espeak", vec!["-w", &filepath_str, text]),
             ("festival", vec!["--tts", text]),
-            ("spd-say", vec!["-w", &filepath.to_string_lossy(), text]),
+            ("spd-say", vec!["-w", &filepath_str, text]),
         ];
         
         for (tool, mut args) in tools {
@@ -204,26 +194,15 @@ impl VoiceTool {
         let filepath = Path::new(&self.temp_dir).join(&filename);
         
         // Record audio
-        let record_result = if cfg!(target_os = "windows") {
-            self.windows_record_audio(&filepath, duration).await
-        } else if cfg!(target_os = "macos") {
+        let record_result = {
+            #[cfg(target_os = "windows")]
+            { self.windows_record_audio(&filepath, duration).await }
             #[cfg(target_os = "macos")]
-            {
-                self.macos_record_audio(&filepath, duration).await
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err(anyhow!("macOS audio recording not supported on this platform"))
-            }
-        } else {
+            { self.macos_record_audio(&filepath, duration).await }
             #[cfg(target_os = "linux")]
-            {
-                self.linux_record_audio(&filepath, duration).await
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(anyhow!("Linux audio recording not supported on this platform"))
-            }
+            { self.linux_record_audio(&filepath, duration).await }
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            { Err(anyhow!("Unsupported OS for audio recording")) }
         };
         
         match record_result {
@@ -298,10 +277,11 @@ impl VoiceTool {
     
     #[cfg(target_os = "macos")]
     async fn macos_record_audio(&self, filepath: &Path, duration: u32) -> Result<()> {
+        let duration_str = duration.to_string();
         let output = Command::new("rec")
             .args([
-                &filepath.to_string_lossy(),
-                "trim", "0", &duration.to_string()
+                &*filepath.to_string_lossy(),
+                "trim", "0", &duration_str
             ])
             .output()?;
             
@@ -315,9 +295,11 @@ impl VoiceTool {
     #[cfg(target_os = "linux")]
     async fn linux_record_audio(&self, filepath: &Path, duration: u32) -> Result<()> {
         // Try different recording tools
+        let duration_str = duration.to_string();
+        let filepath_str = filepath.to_string_lossy();
         let tools = vec![
-            ("arecord", vec!["-d", &duration.to_string(), &filepath.to_string_lossy()]),
-            ("rec", vec![&filepath.to_string_lossy(), "trim", "0", &duration.to_string()]),
+            ("arecord", vec!["-d", &duration_str, &filepath_str]),
+            ("rec", vec![&filepath_str, "trim", "0", &duration_str]),
         ];
         
         for (tool, args) in tools {
@@ -333,26 +315,15 @@ impl VoiceTool {
     }
     
     async fn list_voices(&self) -> Result<ToolResult> {
-        let voices = if cfg!(target_os = "windows") {
-            self.windows_list_voices().await?
-        } else if cfg!(target_os = "macos") {
+        let voices = {
+            #[cfg(target_os = "windows")]
+            { self.windows_list_voices().await? }
             #[cfg(target_os = "macos")]
-            {
-                self.macos_list_voices().await?
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                vec!["Default".to_string()]
-            }
-        } else {
+            { self.macos_list_voices().await? }
             #[cfg(target_os = "linux")]
-            {
-                self.linux_list_voices().await?
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                vec!["default".to_string()]
-            }
+            { self.linux_list_voices().await? }
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            { vec!["Default".to_string()] }
         };
         
         Ok(ToolResult {

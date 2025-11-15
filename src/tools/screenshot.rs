@@ -37,26 +37,15 @@ impl ScreenshotTool {
         let filename = filename.unwrap_or_else(|| self.generate_filename(None));
         let filepath = Path::new(&self.output_dir).join(&filename);
         
-        let result = if cfg!(target_os = "windows") {
-            self.take_windows_screenshot(&filepath, region).await
-        } else if cfg!(target_os = "macos") {
+        let result = {
+            #[cfg(target_os = "windows")]
+            { self.take_windows_screenshot(&filepath, region).await }
             #[cfg(target_os = "macos")]
-            {
-                self.take_macos_screenshot(&filepath, region).await
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                Err(anyhow!("macOS screenshot not supported on this platform"))
-            }
-        } else {
+            { self.take_macos_screenshot(&filepath, region).await }
             #[cfg(target_os = "linux")]
-            {
-                self.take_linux_screenshot(&filepath, region).await
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                Err(anyhow!("Linux screenshot not supported on this platform"))
-            }
+            { self.take_linux_screenshot(&filepath, region).await }
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            { Err(anyhow!("Unsupported OS for screenshots")) }
         };
         
         match result {
@@ -87,7 +76,6 @@ impl ScreenshotTool {
         }
     }
     
-    #[cfg(target_os = "windows")]
     #[cfg(target_os = "windows")]
     async fn take_windows_screenshot(&self, filepath: &Path, region: Option<(i32, i32, i32, i32)>) -> Result<()> {
         // Use PowerShell to take screenshot
@@ -164,7 +152,7 @@ impl ScreenshotTool {
                 
                 match tool {
                     "gnome-screenshot" => {
-                        cmd.args(["-f", &filepath.to_string_lossy()]);
+                        cmd.args(["-f", &*filepath.to_string_lossy()]);
                         if region.is_some() {
                             cmd.arg("-a"); // Area selection
                         }
@@ -173,7 +161,7 @@ impl ScreenshotTool {
                         if let Some((x, y, width, height)) = region {
                             cmd.args(["-a", &format!("{},{},{},{}", x, y, width, height)]);
                         }
-                        cmd.arg(&filepath.to_string_lossy());
+                        cmd.arg(&*filepath.to_string_lossy());
                     }
                     "import" => {
                         if region.is_some() {
@@ -181,69 +169,7 @@ impl ScreenshotTool {
                         } else {
                             cmd.arg("-window").arg("root");
                         }
-                        cmd.arg(&filepath.to_string_lossy());
-                    }
-                    _ => continue,
-                }
-                
-                let output = cmd.output()?;
-                if output.status.success() {
-                    return Ok(());
-                }
-            }
-        }
-        
-        Err(anyhow!("No screenshot tool found. Please install gnome-screenshot, scrot, or imagemagick"))
-    }
-    
-    #[cfg(target_os = "macos")]
-    async fn take_macos_screenshot(&self, filepath: &Path, region: Option<(i32, i32, i32, i32)>) -> Result<()> {
-        let mut cmd = Command::new("screencapture");
-        
-        if let Some((x, y, width, height)) = region {
-            cmd.args(["-R", &format!("{},{},{},{}", x, y, width, height)]);
-        }
-        
-        cmd.arg(filepath);
-        let output = cmd.output()?;
-        
-        if !output.status.success() {
-            return Err(anyhow!("screencapture failed: {}", 
-                String::from_utf8_lossy(&output.stderr)));
-        }
-        
-        Ok(())
-    }
-    
-    #[cfg(target_os = "linux")]
-    async fn take_linux_screenshot(&self, filepath: &Path, region: Option<(i32, i32, i32, i32)>) -> Result<()> {
-        // Try different screenshot tools available on Linux
-        let tools = vec!["gnome-screenshot", "scrot", "import"];
-        
-        for tool in tools {
-            if Command::new("which").arg(tool).output().map(|o| o.status.success()).unwrap_or(false) {
-                let mut cmd = Command::new(tool);
-                
-                match tool {
-                    "gnome-screenshot" => {
-                        cmd.args(["-f", &filepath.to_string_lossy()]);
-                        if region.is_some() {
-                            cmd.arg("-a"); // Area selection
-                        }
-                    }
-                    "scrot" => {
-                        if let Some((x, y, width, height)) = region {
-                            cmd.args(["-a", &format!("{},{},{},{}", x, y, width, height)]);
-                        }
-                        cmd.arg(&filepath.to_string_lossy());
-                    }
-                    "import" => {
-                        if region.is_some() {
-                            cmd.arg("-frame"); // Interactive selection
-                        } else {
-                            cmd.arg("-window").arg("root");
-                        }
-                        cmd.arg(&filepath.to_string_lossy());
+                        cmd.arg(&*filepath.to_string_lossy());
                     }
                     _ => continue,
                 }

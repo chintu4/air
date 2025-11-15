@@ -1,14 +1,12 @@
 use crate::models::{ModelProvider, ModelResponse, QueryContext};
-use crate::providers::{LocalLlamaProvider, OpenAIProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider};
+use crate::providers::{OpenAIProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider};
 use crate::config::Config;
 use crate::tools::ToolManager;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use std::time::Duration;
 use tracing::{info, warn, debug};
 
 pub struct AIAgent {
-    local_provider: Option<Arc<dyn ModelProvider>>,
     cloud_providers: Vec<Arc<dyn ModelProvider>>,
     config: Config,
     tool_manager: ToolManager,
@@ -17,7 +15,6 @@ pub struct AIAgent {
 impl std::fmt::Debug for AIAgent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AIAgent")
-            .field("local_provider", &self.local_provider.is_some())
             .field("cloud_providers_count", &self.cloud_providers.len())
             .field("config", &self.config)
             .field("tool_manager", &"ToolManager")
@@ -28,18 +25,6 @@ impl std::fmt::Debug for AIAgent {
 impl AIAgent {
     pub async fn new(config: Config) -> Result<Self> {
         info!("Initializing AI Agent...");
-        
-        // Initialize local provider
-        let local_provider = match LocalLlamaProvider::new(config.local_model.clone()) {
-            Ok(provider) => {
-                info!("✅ Local model initialized: {:?}", config.local_model.model_path);
-                Some(Arc::new(provider) as Arc<dyn ModelProvider>)
-            }
-            Err(e) => {
-                warn!("❌ Failed to initialize local model: {}", e);
-                None
-            }
-        };
         
         // Initialize cloud providers
         let mut cloud_providers: Vec<Arc<dyn ModelProvider>> = Vec::new();
@@ -102,15 +87,13 @@ impl AIAgent {
             }
         }
         
-        if local_provider.is_none() && cloud_providers.is_empty() {
-            return Err(anyhow!("No providers available! Check your configuration."));
+        if cloud_providers.is_empty() {
+            return Err(anyhow!("No providers available! Check your configuration and API keys."));
         }
         
-        info!("Agent ready - Local: {}, Cloud: {}", 
-              local_provider.is_some(), cloud_providers.len());
+        info!("Agent ready - Cloud providers: {}", cloud_providers.len());
         
         Ok(Self {
-            local_provider,
             cloud_providers,
             config,
             tool_manager: ToolManager::new(),
@@ -147,7 +130,7 @@ impl AIAgent {
                             tool_result.result, prompt
                         );
                         
-                        let mut ai_response = self.query_with_fallback(&enhanced_prompt).await?;
+                        let mut ai_response = self.query(&enhanced_prompt).await?;
                         ai_response.content = format!(
                             "🔧 Tool Result:\n{}\n\n🤖 AI Analysis:\n{}", 
                             tool_result.result, 
@@ -168,89 +151,11 @@ impl AIAgent {
         }
         
         // No tool detected or tool failed, use regular AI processing
-        self.query_with_fallback(prompt).await
+        self.query(prompt).await
     }
     
-    /// Query with smart fallback: try local first, then cloud if needed
-    pub async fn query_with_fallback(&self, prompt: &str) -> Result<ModelResponse> {
-        info!("🔄 Processing query with smart fallback strategy");
-        
-        let context = QueryContext {
-            prompt: prompt.to_string(),
-            max_tokens: self.config.local_model.max_tokens,
-            temperature: self.config.local_model.temperature,
-            timeout: Duration::from_secs(self.config.performance.local_timeout_seconds),
-            pure_mode: false,
-        };
-        
-        // Strategy 1: Try local first for fast response
-        if let Some(local_provider) = &self.local_provider {
-            if local_provider.is_available() {
-                info!("🏠 Trying local model first...");
-                
-                match tokio::time::timeout(
-                    Duration::from_secs(self.config.performance.local_timeout_seconds),
-                    local_provider.generate(&context)
-                ).await {
-                    Ok(Ok(mut response)) => {
-                        info!("✅ Local model succeeded in {}ms", response.response_time_ms);
-                        
-                        // Check if we should also try cloud for comparison/quality
-                        if self.should_try_cloud_for_quality(&response) {
-                            info!("🌤️  Also trying cloud for potential quality improvement...");
-                            if let Ok(cloud_response) = self.try_best_cloud_provider(&context).await {
-                                if cloud_response.confidence_score.unwrap_or(0.0) > 
-                                   response.confidence_score.unwrap_or(0.0) + 0.1 {
-                                    info!("📈 Cloud provider gave significantly better response");
-                                    return Ok(cloud_response);
-                                }
-                            }
-                        }
-                        
-                        response.content = format!("🏠 Local Model Response:\n{}", response.content);
-                        return Ok(response);
-                    }
-                    Ok(Err(e)) => {
-                        warn!("❌ Local model failed: {}", e);
-                    }
-                    Err(_) => {
-                        warn!("⏰ Local model timed out");
-                    }
-                }
-            }
-        }
-        
-        // Strategy 2: Fallback to cloud providers
-        info!("🌤️  Falling back to cloud providers...");
-        self.try_best_cloud_provider(&context).await
-    }
-    
-    /// Force local model only
-    pub async fn query_local_only(&self, prompt: &str) -> Result<ModelResponse> {
-        let local_provider = self.local_provider.as_ref()
-            .ok_or_else(|| anyhow!("Local provider not available"))?;
-        
-        if !local_provider.is_available() {
-            return Err(anyhow!("Local model is not available"));
-        }
-        
-        info!("🏠 Using local model only");
-        
-        let context = QueryContext {
-            prompt: prompt.to_string(),
-            max_tokens: self.config.local_model.max_tokens,
-            temperature: self.config.local_model.temperature,
-            timeout: Duration::from_secs(self.config.performance.local_timeout_seconds),
-            pure_mode: false,
-        };
-        
-        let mut response = local_provider.generate(&context).await?;
-        response.content = format!("🏠 Local Model Response:\n{}", response.content);
-        Ok(response)
-    }
-    
-    /// Force cloud model only
-    pub async fn query_cloud_only(&self, prompt: &str) -> Result<ModelResponse> {
+    /// Query the best available cloud provider
+    pub async fn query(&self, prompt: &str) -> Result<ModelResponse> {
         if self.cloud_providers.is_empty() {
             return Err(anyhow!("No cloud providers available"));
         }
@@ -261,33 +166,11 @@ impl AIAgent {
             prompt: prompt.to_string(),
             max_tokens: 1000, // Use higher limit for cloud
             temperature: 0.7,
-            timeout: Duration::from_secs(30),
+            timeout: std::time::Duration::from_secs(30),
             pure_mode: false,
         };
         
         self.try_best_cloud_provider(&context).await
-    }
-    
-    /// Force local model only with pure response (no templates)
-    pub async fn query_pure_local(&self, prompt: &str) -> Result<ModelResponse> {
-        let local_provider = self.local_provider.as_ref()
-            .ok_or_else(|| anyhow!("Local provider not available"))?;
-        
-        if !local_provider.is_available() {
-            return Err(anyhow!("Local model is not available"));
-        }
-        
-        info!("🏠 Using local model in pure mode (no templates)");
-        
-        let context = QueryContext {
-            prompt: prompt.to_string(),
-            max_tokens: self.config.local_model.max_tokens,
-            temperature: self.config.local_model.temperature,
-            timeout: Duration::from_secs(self.config.performance.local_timeout_seconds),
-            pure_mode: true,
-        };
-        
-        local_provider.generate(&context).await
     }
     
     async fn try_best_cloud_provider(&self, context: &QueryContext) -> Result<ModelResponse> {
@@ -325,27 +208,5 @@ impl AIAgent {
         }
         
         Err(anyhow!("All cloud providers failed"))
-    }
-    
-    fn should_try_cloud_for_quality(&self, local_response: &ModelResponse) -> bool {
-        // Don't try cloud if local response was very fast and good enough
-        if local_response.response_time_ms < self.config.performance.fallback_threshold_ms {
-            if let Some(confidence) = local_response.confidence_score {
-                if confidence >= self.config.performance.quality_threshold {
-                    return false;
-                }
-            }
-        }
-        
-        // For simple queries, prefer local
-        if self.config.performance.prefer_local_for_simple_queries {
-            let word_count = local_response.content.split_whitespace().count();
-            if word_count < 50 { // Simple query/response
-                return false;
-            }
-        }
-        
-        // Try cloud for complex queries or if we have fast cloud providers
-        !self.cloud_providers.is_empty()
     }
 }
