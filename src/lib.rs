@@ -1,12 +1,10 @@
 //! # RUAI - Rust AI Agent Library
 //! 
-//! A high-performance AI agent system supporting both local and cloud models.
+//! A high-performance AI agent system supporting cloud models.
 //! 
 //! ## Features
 //! 
-//! - Local GGUF model support with intelligent response generation
 //! - Cloud provider integration (OpenAI, Anthropic, etc.)
-//! - Automatic fallback between local and cloud models
 //! - Performance monitoring and metrics
 //! - Query classification and routing
 //! 
@@ -17,7 +15,7 @@
 //! 
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
-//!     let config = Config::from_file("config.toml")?;
+//!     let config = Config::load()?;
 //!     let agent = AIAgent::new(config).await?;
 //!     
 //!     let response = agent.query("What is 2+2?").await?;
@@ -35,6 +33,6 @@ pub mod tools;
 
 // Re-export commonly used types for convenience
 pub use agent::AIAgent;
-pub use config::{Config, LocalModelConfig, CloudProviderConfig, PerformanceConfig};
+pub use config::{Config, CloudProviderConfig, PerformanceConfig};
 pub use models::{ModelProvider, ModelResponse, QueryContext, ModelMetrics};
 pub use tools::{Tool, ToolCall, ToolResult};

@@ -1,21 +1,10 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    pub local_model: LocalModelConfig,
     pub cloud_providers: Vec<CloudProviderConfig>,
     pub performance: PerformanceConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalModelConfig {
-    pub model_path: PathBuf,
-    pub max_tokens: u32,
-    pub temperature: f32,
-    pub context_length: u32,
-    pub threads: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,10 +20,8 @@ pub struct CloudProviderConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceConfig {
-    pub local_timeout_seconds: u64,
     pub fallback_threshold_ms: u64,
     pub quality_threshold: f32,
-    pub prefer_local_for_simple_queries: bool,
 }
 
 impl Config {
@@ -78,25 +65,11 @@ impl Config {
             Ok(Self::default())
         }
     }
-    
-    pub fn save(&self) -> Result<()> {
-        let config_path = std::env::current_dir()?.join("config.toml");
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(config_path, content)?;
-        Ok(())
-    }
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            local_model: LocalModelConfig {
-                model_path: PathBuf::from(r"C:\models\tinyllama-1.1b-chat-v1.0.Q2_K.gguf"),
-                max_tokens: 512,
-                temperature: 0.7,
-                context_length: 2048,
-                threads: num_cpus::get() as u32,
-            },
             cloud_providers: vec![
                 // CloudProviderConfig {
                 //     name: "openai".to_string(),
@@ -136,10 +109,8 @@ impl Default for Config {
                 },
             ],
             performance: PerformanceConfig {
-                local_timeout_seconds: 10,
                 fallback_threshold_ms: 3000,
                 quality_threshold: 0.8,
-                prefer_local_for_simple_queries: true,
             },
         }
     }
