@@ -4,7 +4,6 @@ use crate::config::Config;
 use crate::tools::ToolManager;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{info, warn, debug};
 
 pub struct AIAgent {
@@ -137,24 +136,13 @@ impl AIAgent {
                             tool_result.result, prompt
                         );
                         
-                        let result = self.query(&enhanced_prompt).await;
-                        let mut successful_queries = self.successful_queries.lock().await;
-                        let mut failed_queries = self.failed_queries.lock().await;
-                        match result {
-                            Ok(mut ai_response) => {
-                                *successful_queries += 1;
-                                ai_response.content = format!(
-                                    "🔧 Tool Result:\n{}\n\n🤖 AI Analysis:\n{}",
-                                    tool_result.result,
-                                    ai_response.content
-                                );
-                                return Ok(ai_response);
-                            },
-                            Err(e) => {
-                                *failed_queries += 1;
-                                return Err(e);
-                            }
-                        }
+                        let mut ai_response = self.query(&enhanced_prompt).await?;
+                        ai_response.content = format!(
+                            "🔧 Tool Result:\n{}\n\n🤖 AI Analysis:\n{}", 
+                            tool_result.result, 
+                            ai_response.content
+                        );
+                        return Ok(ai_response);
                         
                     } else {
                         warn!("❌ Tool execution failed: {}", tool_result.result);
@@ -169,19 +157,7 @@ impl AIAgent {
         }
         
         // No tool detected or tool failed, use regular AI processing
-        let result = self.query(prompt).await;
-        let mut successful_queries = self.successful_queries.lock().await;
-        let mut failed_queries = self.failed_queries.lock().await;
-        match result {
-            Ok(response) => {
-                *successful_queries += 1;
-                Ok(response)
-            },
-            Err(e) => {
-                *failed_queries += 1;
-                Err(e)
-            }
-        }
+        self.query(prompt).await
     }
     
     /// Query the best available cloud provider
@@ -238,11 +214,5 @@ impl AIAgent {
         }
         
         Err(anyhow!("All cloud providers failed"))
-    }
-
-    pub async fn get_stats(&self) -> (u32, u32) {
-        let successful_queries = self.successful_queries.lock().await;
-        let failed_queries = self.failed_queries.lock().await;
-        (*successful_queries, *failed_queries)
     }
 }

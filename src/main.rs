@@ -95,7 +95,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
                         continue;
                     }
                     "stats" => {
-                        show_stats(&agent).await?;
+                        show_stats().await?;
                         continue;
                     }
                     "clear" | "cls" => {
@@ -198,12 +198,9 @@ fn show_help() {
     println!("═══════════════════════════════════════════════════════════════════");
 }
 
-async fn show_stats(agent: &AIAgent) -> Result<()> {
-    let (successful_queries, failed_queries) = agent.get_stats().await;
+async fn show_stats() -> Result<()> {
     println!("\n📊 RUAI Usage Statistics:");
     println!("════════════════════════");
-    println!("✅ Successful Queries: {}", successful_queries);
-    println!("❌ Failed Queries: {}", failed_queries);
     println!("☁️  Cloud Models: Check configuration");
     println!("⚡ Status: Ready for queries");
     println!("💡 Tip: Use 'help' to see available commands");
