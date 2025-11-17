@@ -10,6 +10,8 @@ pub struct AIAgent {
     cloud_providers: Vec<Arc<dyn ModelProvider>>,
     config: Config,
     tool_manager: ToolManager,
+    successful_queries: Arc<Mutex<u32>>,
+    failed_queries: Arc<Mutex<u32>>,
 }
 
 impl std::fmt::Debug for AIAgent {
@@ -97,6 +99,8 @@ impl AIAgent {
             cloud_providers,
             config,
             tool_manager: ToolManager::new(),
+            successful_queries: Arc::new(Mutex::new(0)),
+            failed_queries: Arc::new(Mutex::new(0)),
         })
     }
     
@@ -115,6 +119,8 @@ impl AIAgent {
                         
                         // For simple tool results, return directly
                         if tool_name == "web" || tool_name == "filesystem" {
+                            let mut successful_queries = self.successful_queries.lock().await;
+                            *successful_queries += 1;
                             return Ok(ModelResponse {
                                 content: format!("🔧 Tool Result ({}): \n\n{}", tool_name, tool_result.result),
                                 model_used: format!("Tool-{}", tool_name),
