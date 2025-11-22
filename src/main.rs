@@ -29,6 +29,11 @@ struct Args {
 enum Commands {
     /// Login to cloud providers (e.g., Gemini)
     Login,
+    /// Setup local environment (Ollama, models, etc.)
+    Setup {
+        #[arg(long, help = "Setup local models")]
+        local: bool,
+    },
     /// Memory and knowledge management
     Memory {
         #[command(subcommand)]
@@ -66,6 +71,14 @@ async fn main() -> Result<()> {
     match args.command {
         Some(Commands::Login) => {
             handle_login().await?;
+            return Ok(());
+        },
+        Some(Commands::Setup { local }) => {
+            if local {
+                handle_local_setup().await?;
+            } else {
+                println!("Please specify what to setup (e.g., --local)");
+            }
             return Ok(());
         },
         Some(Commands::Memory { command }) => {
@@ -168,6 +181,90 @@ async fn handle_login() -> Result<()> {
 
     println!("\n✅ Gemini API Key saved successfully to .env!");
     println!("You can now use 'air' to chat with Gemini.");
+
+    Ok(())
+}
+
+async fn handle_local_setup() -> Result<()> {
+    println!("\n🏠 Local Model Setup (Pure Rust via Candle)");
+    println!("═══════════════════════════════════════════");
+    println!("This will help you set up a GGUF model for local inference.");
+
+    // Check for models directory
+    let home_dir = dirs::home_dir().ok_or(anyhow::anyhow!("Could not find home directory"))?;
+    let models_dir = home_dir.join(".air").join("models");
+
+    if !models_dir.exists() {
+        std::fs::create_dir_all(&models_dir)?;
+        println!("Created models directory: {:?}", models_dir);
+    }
+
+    let model_filename = "tinyllama-1.1b-chat-v1.0.Q2_K.gguf";
+    let model_path = models_dir.join(model_filename);
+
+    if model_path.exists() {
+        println!("✅ Model already exists at: {:?}", model_path);
+    } else {
+        println!("⚠️  Model not found.");
+        println!("Downloading TinyLlama (approx 480MB)...");
+
+        let url = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q2_K.gguf";
+        let response = reqwest::get(url).await?;
+
+        if response.status().is_success() {
+            let content = response.bytes().await?;
+            std::fs::write(&model_path, content)?;
+            println!("✅ Successfully downloaded model to: {:?}", model_path);
+        } else {
+            println!("❌ Failed to download model: {}", response.status());
+            return Ok(());
+        }
+    }
+
+    // Update configuration to point to the model
+    println!("\n📝 Updating configuration...");
+
+    let config_path = std::env::current_dir()?.join("config.toml");
+    if config_path.exists() {
+         match std::fs::read_to_string(&config_path) {
+            Ok(content) => {
+                 let mut new_config = content;
+
+                 // Enable preference for local
+                 if new_config.contains("prefer_local_for_simple_queries = false") {
+                     new_config = new_config.replace("prefer_local_for_simple_queries = false", "prefer_local_for_simple_queries = true");
+                 }
+
+                 // Update model path
+                 // Note: This regex-like replacement is simple; ideal would be proper TOML parsing
+                 // We look for the model_path line and replace it
+                 let lines: Vec<&str> = new_config.lines().collect();
+                 let mut updated_lines = Vec::new();
+
+                 let path_str = model_path.to_string_lossy().replace("\\", "\\\\");
+
+                 for line in lines {
+                     if line.trim().starts_with("model_path =") {
+                         updated_lines.push(format!("model_path = \"{}\"", path_str));
+                     } else {
+                         updated_lines.push(line.to_string());
+                     }
+                 }
+
+                 new_config = updated_lines.join("\n");
+
+                 match std::fs::write(&config_path, new_config) {
+                     Ok(_) => println!("✅ Configuration updated successfully."),
+                     Err(e) => println!("❌ Failed to write config: {}", e),
+                 }
+            },
+            Err(e) => println!("❌ Failed to read config: {}", e),
+         }
+    } else {
+        println!("⚠️ config.toml not found. Skipping update.");
+    }
+
+    println!("\n🎉 You are ready to go! Run 'air --local-only' to force local mode.");
 
     Ok(())
 }

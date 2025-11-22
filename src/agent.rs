@@ -1,5 +1,5 @@
 use crate::models::{ModelProvider, ModelResponse, QueryContext};
-use crate::providers::{OpenAIProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider};
+use crate::providers::{OpenAIProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider, LocalProvider};
 use crate::config::Config;
 use crate::tools::ToolManager;
 use anyhow::{Result, anyhow};
@@ -8,6 +8,7 @@ use tokio::sync::Mutex;
 use tracing::{info, warn, debug};
 
 pub struct AIAgent {
+    local_provider: Option<Arc<dyn ModelProvider>>,
     cloud_providers: Vec<Arc<dyn ModelProvider>>,
     config: Config,
     tool_manager: ToolManager,
@@ -18,6 +19,7 @@ pub struct AIAgent {
 impl std::fmt::Debug for AIAgent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AIAgent")
+            .field("local_provider", &self.local_provider.is_some())
             .field("cloud_providers_count", &self.cloud_providers.len())
             .field("config", &self.config)
             .field("tool_manager", &"ToolManager")
@@ -29,6 +31,24 @@ impl AIAgent {
     pub async fn new(config: Config) -> Result<Self> {
         info!("Initializing AI Agent...");
         
+        // Initialize local provider
+        let local_provider: Option<Arc<dyn ModelProvider>> = match LocalProvider::new(config.local_model.clone()) {
+            Ok(provider) => {
+                // Check availability (does file exist?)
+                if provider.is_available() {
+                    info!("✅ Local provider initialized");
+                    Some(Arc::new(provider))
+                } else {
+                    info!("ℹ️  Local provider configured but model file not found (run 'setup --local' to install)");
+                    None
+                }
+            },
+            Err(e) => {
+                warn!("❌ Failed to initialize local provider: {}", e);
+                None
+            }
+        };
+
         // Initialize cloud providers
         let mut cloud_providers: Vec<Arc<dyn ModelProvider>> = Vec::new();
         
@@ -90,13 +110,15 @@ impl AIAgent {
             }
         }
         
-        if cloud_providers.is_empty() {
-            return Err(anyhow!("No providers available! Check your configuration and API keys."));
+        if cloud_providers.is_empty() && local_provider.is_none() {
+            // It's okay if cloud providers are empty if we have local, but warn if nothing.
+            warn!("⚠️  No providers available! Run 'air setup --local' or configure API keys.");
         }
         
-        info!("Agent ready - Cloud providers: {}", cloud_providers.len());
+        info!("Agent ready - Local: {}, Cloud: {}", local_provider.is_some(), cloud_providers.len());
         
         Ok(Self {
+            local_provider,
             cloud_providers,
             config,
             tool_manager: ToolManager::new(),
@@ -161,22 +183,41 @@ impl AIAgent {
         self.query(prompt).await
     }
     
-    /// Query the best available cloud provider
+    /// Query the best available provider (local or cloud)
     pub async fn query(&self, prompt: &str) -> Result<ModelResponse> {
-        if self.cloud_providers.is_empty() {
-            return Err(anyhow!("No cloud providers available"));
-        }
+        // Try local first if configured or fallback to cloud
+        // Logic:
+        // 1. If local is available, use it (fast, free, private).
+        // 2. If local fails or not available, use cloud.
         
-        info!("🌤️  Using cloud models only");
+        // TODO: Implement "smart routing" (use cloud for complex tasks)
+        // For now, simple priority: Local > Cloud
         
         let context = QueryContext {
             prompt: prompt.to_string(),
-            max_tokens: 1000, // Use higher limit for cloud
+            max_tokens: 1000,
             temperature: 0.7,
-            timeout: std::time::Duration::from_secs(30),
+            timeout: std::time::Duration::from_secs(60), // Longer timeout for local
             pure_mode: false,
         };
+
+        if let Some(local) = &self.local_provider {
+            if local.is_available() {
+                info!("🏠 Using local model");
+                match local.generate(&context).await {
+                    Ok(response) => return Ok(response),
+                    Err(e) => {
+                        warn!("❌ Local inference failed: {}. Falling back to cloud.", e);
+                    }
+                }
+            }
+        }
+
+        if self.cloud_providers.is_empty() {
+            return Err(anyhow!("No cloud providers available and local failed/missing."));
+        }
         
+        info!("🌤️  Using cloud models");
         self.try_best_cloud_provider(&context).await
     }
     

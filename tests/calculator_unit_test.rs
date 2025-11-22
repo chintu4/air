@@ -172,9 +172,9 @@
 //         // Shows how line-specific references could work in the future
         
 //         // Example of what could be supported:
-//         // ruai -p "read file src/calculator.rs lines 12-25"
-//         // ruai -p "analyze file src/main.rs line 50"
-//         // ruai -p "show file README.md lines 1-20"
+//         // air -p "read file src/calculator.rs lines 12-25"
+//         // air -p "analyze file src/main.rs line 50"
+//         // air -p "show file README.md lines 1-20"
         
 //         // For now, this test documents the desired functionality
 //         // Implementation would require enhancing the file reading logic

@@ -1,5 +1,5 @@
 #!/usr/bin/env pwsh
-# PowerShell script for easy RUAI usage
+# PowerShell script for easy AIR usage
 
 param(
     [Parameter(Mandatory=$true)]
@@ -10,7 +10,7 @@ param(
     [switch]$VerboseOutput
 )
 
-Write-Host "🤖 RUAI - Rust AI Agent" -ForegroundColor Green
+Write-Host "🤖 AIR - Rust AI Agent" -ForegroundColor Green
 Write-Host "=========================" -ForegroundColor Green
 
 $args = @("--prompt", $Prompt)
@@ -35,4 +35,4 @@ Write-Host ""
 
 # Run the Rust application
 # cargo run -- @args
-./target/debug/ruai @args
+./target/debug/air @args

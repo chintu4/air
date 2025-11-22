@@ -1,6 +1,6 @@
-# Production Setup for RUAI
+# Production Setup for AIR
 
-This document explains how to set up RUAI for production use with actual GGUF model inference.
+This document explains how to set up AIR for production use with actual GGUF model inference.
 
 ## Current Status
 
@@ -137,7 +137,7 @@ cargo run -- -p "Your prompt"
 **For production:**
 ```bash
 cargo build --release
-.\target\release\ruai.exe -p "Your prompt"
+.\target\release\air.exe -p "Your prompt"
 ```
 
 **As a service:**
