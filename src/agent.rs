@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::tools::ToolManager;
 use anyhow::{Result, anyhow};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{info, warn, debug};
 
 pub struct AIAgent {
