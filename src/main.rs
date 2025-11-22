@@ -14,10 +14,10 @@ use agent::AIAgent;
 use config::Config;
 
 #[derive(Parser)]
-#[command(name = "ruai")]
+#[command(name = "air")]
 #[command(about = "AI Agent with cloud model support")]
 struct Args {
-    #[arg(short, long, help = "Input prompt for the AI")]
+    #[arg(help = "Input prompt for the AI")]
     prompt: Option<String>,
     
     #[arg(short, long, help = "Run in interactive mode")]
