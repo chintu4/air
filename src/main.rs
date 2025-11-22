@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber;
 use std::io::{self, Write};
@@ -25,6 +25,15 @@ struct Args {
     
     #[arg(short, long, help = "Verbose output")]
     verbose: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Login to cloud providers (e.g., Gemini)
+    Login,
 }
 
 #[tokio::main]
@@ -44,6 +53,12 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
+    // Handle subcommands first
+    if let Some(Commands::Login) = args.command {
+        handle_login().await?;
+        return Ok(());
+    }
+
     info!("Starting RUAI Agent...");
 
     // Load configuration
@@ -59,6 +74,77 @@ async fn main() -> Result<()> {
         run_single_query(agent, args).await?;
     }
     
+    Ok(())
+}
+
+async fn handle_login() -> Result<()> {
+    println!("\n🔑 Login Setup for Gemini (Google)");
+    println!("══════════════════════════════════");
+    println!("To use Gemini, you need an API key from Google AI Studio.");
+    println!();
+    println!("1. I will open the Google AI Studio page for you.");
+    println!("2. Click 'Create API key' or copy an existing one.");
+    println!("3. Come back here and paste the key.");
+    println!();
+
+    print!("👉 Press Enter to open browser...");
+    io::stdout().flush()?;
+    let mut buffer = String::new();
+    io::stdin().read_line(&mut buffer)?;
+
+    // Open browser
+    if let Err(e) = open::that("https://aistudio.google.com/app/apikey") {
+        println!("⚠️  Could not open browser automatically: {}", e);
+        println!("Please verify this URL manually: https://aistudio.google.com/app/apikey");
+    }
+
+    println!();
+    print!("🔑 Paste your Gemini API Key here: ");
+    io::stdout().flush()?;
+
+    let mut key = String::new();
+    io::stdin().read_line(&mut key)?;
+    let key = key.trim();
+
+    if key.is_empty() {
+        println!("❌ No key provided. Aborting.");
+        return Ok(());
+    }
+
+    // Read existing .env or create new
+    let env_path = std::env::current_dir()?.join(".env");
+    let mut env_content = String::new();
+
+    if env_path.exists() {
+        env_content = std::fs::read_to_string(&env_path)?;
+    }
+
+    // Update or append GEMINI_KEY
+    let mut new_lines = Vec::new();
+    let mut found = false;
+
+    for line in env_content.lines() {
+        if line.starts_with("GEMINI_KEY=") {
+            new_lines.push(format!("GEMINI_KEY={}", key));
+            found = true;
+        } else {
+            new_lines.push(line.to_string());
+        }
+    }
+
+    if !found {
+        new_lines.push(format!("GEMINI_KEY={}", key));
+    }
+
+    // Write back to .env
+    let mut file = std::fs::File::create(&env_path)?;
+    for line in new_lines {
+        writeln!(file, "{}", line)?;
+    }
+
+    println!("\n✅ Gemini API Key saved successfully to .env!");
+    println!("You can now use 'air' to chat with Gemini.");
+
     Ok(())
 }
 
@@ -190,6 +276,9 @@ fn show_help() {
     println!("   • remember [key] [value]    - Store information in memory");
     println!("   • recall [key]              - Retrieve stored information");
     println!("   • plan [goal]               - Create step-by-step plans");
+    println!();
+    println!("🔹 Setup:");
+    println!("   • login                     - Configure API keys for cloud providers");
     println!();
     println!("💡 Tips:");
     println!("   • You can ask natural questions - RUAI will detect when to use tools");

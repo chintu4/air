@@ -36,6 +36,7 @@ candle-transformers = "0.8"
 hf-hub = "0.3"
 tokenizers = "0.20"
 rand = "0.8"
+open = "5.3.3"
 
 [dev-dependencies]
 tempfile = "3.8"
