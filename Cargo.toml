@@ -38,7 +38,6 @@ tokenizers = "0.20"
 rand = "0.8"
 open = "5.3.3"
 dirs = "5.0"
-minijinja = { version = "1.0", features = ["loader"] }
 
 [dev-dependencies]
 tempfile = "3.8"

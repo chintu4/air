@@ -13,13 +13,10 @@ use candle_transformers::models::quantized_llama::ModelWeights;
 use candle_transformers::generation::LogitsProcessor;
 use tokenizers::Tokenizer;
 use hf_hub::api::sync::Api;
-use minijinja::Environment;
-use serde::Serialize;
 
 struct LocalState {
     model: Option<ModelWeights>,
     tokenizer: Option<Tokenizer>,
-    template: Option<String>, // Raw template string
 }
 
 pub struct LocalProvider {
@@ -34,9 +31,13 @@ impl LocalProvider {
             state: Arc::new(Mutex::new(LocalState {
                 model: None,
                 tokenizer: None,
-                template: None,
             })),
         };
+
+        // Attempt to load immediately to ensure readiness, but don't fail if just missing file (setup might happen later)
+        // actually, for 'air', if we configured it, we expect it to work.
+        // But `new` is sync. Let's spawn a thread or just do it lazily?
+        // Let's do it lazily in generate, or check existence now.
 
         Ok(provider)
     }
@@ -64,53 +65,21 @@ impl LocalProvider {
         )?;
 
         // Load tokenizer
+        // We try to find tokenizer.json in the same folder, or ~/.air/models/tokenizer.json
+        // Or fetch from HF.
         let tokenizer = match load_tokenizer(&model_path) {
             Ok(t) => t,
             Err(e) => {
                 warn!("Could not find local tokenizer.json: {}. Attempting download...", e);
-                // Use simple download instead of hf-hub to avoid complex setup/errors
-                let url = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json";
-                let parent = model_path.parent().unwrap();
-                let tokenizer_path = parent.join("tokenizer.json");
-
-                // We can't easily use async reqwest here because we are inside a sync function (ensure_loaded is called from async generate but it holds a lock? No, generate is async).
-                // Actually, ensure_loaded returns Result<()>, but it is called from generate.
-                // But `generate` calls it synchronously before spawning blocking task?
-                // `ensure_loaded` performs blocking IO (File::open).
-
-                // Using blocking reqwest would require `blocking` feature.
-                // Or we can use `std::process::Command` to curl/powershell? No.
-                // We already have `reqwest` async. We can use a new runtime or just fail?
-
-                // Better: In `ensure_loaded`, if we need to download, we should probably fail if we can't do it synchronously/easily,
-                // OR assume `setup` should have done it.
-
-                // Since `air setup --local` is the recommended path, I will update `setup` to ALSO download tokenizer.json.
-                // And here, I will return a helpful error.
-
-                return Err(anyhow!("tokenizer.json missing. Please run 'air setup --local' again to repair it."));
+                let api = Api::new()?;
+                let repo = api.model("TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string());
+                let path = repo.get("tokenizer.json")?;
+                Tokenizer::from_file(path).map_err(Error::msg)?
             }
-        };
-
-        // Try to get chat template from tokenizer config
-        // tokenizers crate doesn't expose the raw config JSON easily in struct,
-        // but we can look for tokenizer_config.json if it exists
-        let parent = model_path.parent().unwrap();
-        let config_path = parent.join("tokenizer_config.json");
-        let template = if config_path.exists() {
-             if let Ok(content) = std::fs::read_to_string(config_path) {
-                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                     json.get("chat_template").and_then(|v| v.as_str()).map(|s| s.to_string())
-                 } else { None }
-             } else { None }
-        } else {
-             // Fallback: TinyLlama template
-             Some("{% for message in messages %}<|{{message.role}}|>\n{{message.content}}</s>\n{% endfor %}{% if add_generation_prompt %}<|assistant|>\n{% endif %}".to_string())
         };
 
         state.model = Some(model);
         state.tokenizer = Some(tokenizer);
-        state.template = template;
 
         info!("Model loaded in {:.2?}", start.elapsed());
         Ok(())
@@ -124,12 +93,6 @@ fn load_tokenizer(model_path: &PathBuf) -> Result<Tokenizer> {
         return Tokenizer::from_file(json_path).map_err(Error::msg);
     }
     Err(anyhow!("tokenizer.json not found"))
-}
-
-#[derive(Serialize)]
-struct Message {
-    role: String,
-    content: String,
 }
 
 #[async_trait]
@@ -156,48 +119,19 @@ impl ModelProvider for LocalProvider {
         // We clone the state wrapper to move into the blocking task
         let state_arc = self.state.clone();
         let prompt = context.prompt.clone();
-        let temperature = context.temperature as f64;
+        let temperature = context.temperature as f64; // candle expects f64
         let max_tokens = context.max_tokens as usize;
 
+        // Run inference in a blocking thread to avoid blocking the async runtime
         let result = tokio::task::spawn_blocking(move || {
             let mut state = state_arc.lock().unwrap();
-            // Clone simple things first
+            // We need to split the borrow
             let tokenizer = state.tokenizer.clone().unwrap();
-            let template_str = state.template.clone().unwrap_or_default();
-            // Then get mutable reference to model
             let model = state.model.as_mut().unwrap();
 
-            // Render Prompt using Minijinja
-            let mut env = Environment::new();
-            // We need to register the template.
-            // Since we are running in a tight loop, creating env every time is slightly inefficient
-            // but acceptable for local LLM inference speeds.
-
-            let formatted_prompt = if !template_str.is_empty() {
-                env.add_template("chat", &template_str).map_err(|e| anyhow!(e))?;
-                let tmpl = env.get_template("chat").map_err(|e| anyhow!(e))?;
-
-                let messages = vec![
-                    Message { role: "user".to_string(), content: prompt }
-                ];
-
-                // Inject special tokens into context for templates that use them (like Llama 2/3)
-                let bos_token = tokenizer.token_to_id("<s>").or_else(|| tokenizer.token_to_id("<|begin_of_text|>")).map(|id| tokenizer.decode(&[id], false).unwrap_or_default()).unwrap_or_default();
-                let eos_token = tokenizer.token_to_id("</s>").or_else(|| tokenizer.token_to_id("<|end_of_text|>")).map(|id| tokenizer.decode(&[id], false).unwrap_or_default()).unwrap_or_default();
-
-                tmpl.render(serde_json::json!({
-                    "messages": messages,
-                    "add_generation_prompt": true,
-                    "bos_token": bos_token,
-                    "eos_token": eos_token,
-                    "unk_token": ""
-                })).map_err(|e| anyhow!(e))?
-            } else {
-                // Fallback simple format
-                format!("User: {}\nAssistant:", prompt)
-            };
-
-            debug!("Formatted Prompt:\n{}", formatted_prompt);
+            // Format prompt for TinyLlama Chat
+            // <|user|>\n{prompt}</s>\n<|assistant|>
+            let formatted_prompt = format!("<|user|>\n{}</s>\n<|assistant|>", prompt);
 
             let tokens = tokenizer.encode(formatted_prompt, true).map_err(Error::msg)?;
             let tokens = tokens.get_ids();
@@ -208,42 +142,17 @@ impl ModelProvider for LocalProvider {
 
             let start_gen = Instant::now();
 
-            // Optimization: Pre-process the prompt tokens just once?
-            // For quantized_llama, we typically feed the whole prompt and get logits for the last token.
-            // But subsequent steps only need the new token if KV cache is working.
-
-            // Since this `ModelWeights` is stateful (it likely holds the KV cache internally if it's from `candle-transformers`),
-            // we should check how `forward` works.
-            // Actually, `candle-transformers` quantized llama usually expects the *new* tokens and an index.
-
-            // First pass: Process the prompt
-            let input = Tensor::new(current_tokens.as_slice(), &Device::Cpu)?.unsqueeze(0)?;
-            let logits = model.forward(&input, 0)?;
-            let logits = logits.squeeze(0)?;
-            let mut next_token = logits_processor.sample(&logits)?;
-
-            generated_tokens.push(next_token);
-            current_tokens.push(next_token);
-
-            for _ in 1..max_tokens {
-                let input = Tensor::new(&[next_token], &Device::Cpu)?.unsqueeze(0)?;
-                let logits = model.forward(&input, current_tokens.len() - 1)?;
+            for _ in 0..max_tokens {
+                let input = Tensor::new(current_tokens.as_slice(), &Device::Cpu)?.unsqueeze(0)?;
+                let logits = model.forward(&input, current_tokens.len())?;
                 let logits = logits.squeeze(0)?;
 
-                next_token = logits_processor.sample(&logits)?;
+                let next_token = logits_processor.sample(&logits)?;
                 generated_tokens.push(next_token);
                 current_tokens.push(next_token);
 
-                // Check for EOS token
-                if let Some(eos_id) = tokenizer.token_to_id("</s>") {
-                     if next_token == eos_id {
-                         break;
-                     }
-                } else if let Some(eos_id) = tokenizer.token_to_id("<|end_of_text|>") {
-                    // Llama 3 style
-                     if next_token == eos_id {
-                         break;
-                     }
+                if next_token == tokenizer.token_to_id("</s>").unwrap_or(2) {
+                    break;
                 }
             }
 
@@ -252,7 +161,7 @@ impl ModelProvider for LocalProvider {
 
             Ok::<ModelResponse, anyhow::Error>(ModelResponse {
                 content: response_text,
-                model_used: "Local GGUF".to_string(),
+                model_used: "TinyLlama-1.1B-Quantized".to_string(),
                 tokens_used: generated_tokens.len() as u32,
                 response_time_ms: time_ms,
                 confidence_score: None,
