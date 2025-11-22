@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool};
+use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool, KnowledgeTool};
 use anyhow::Result;
 use serde_json::json;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ pub struct ToolManager {
     command: Arc<dyn Tool>,
     screenshot: Arc<dyn Tool>,
     voice: Arc<dyn Tool>,
+    knowledge: Arc<dyn Tool>,
 }
 
 impl ToolManager {
@@ -26,6 +27,7 @@ impl ToolManager {
             command: Arc::new(CommandTool::new()),
             screenshot: Arc::new(ScreenshotTool::new(None)),
             voice: Arc::new(VoiceTool::new(None)),
+            knowledge: Arc::new(KnowledgeTool::new().expect("Failed to init knowledge tool")),
         }
     }
     
@@ -241,6 +243,7 @@ impl ToolManager {
             "command" => &self.command,
             "screenshot" => &self.screenshot,
             "voice" => &self.voice,
+            "knowledge" => &self.knowledge,
             _ => return Err(anyhow::anyhow!("Unknown tool: {}", tool_name)),
         };
         

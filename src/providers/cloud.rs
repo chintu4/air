@@ -508,8 +508,8 @@ impl ModelProvider for OpenRouterProvider {
             .post(&format!("{}/chat/completions", self.config.base_url))
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
-            .header("HTTP-Referer", "https://github.com/your-repo/ruai") // Required by OpenRouter
-            .header("X-Title", "RUAI - Rust AI Agent") // Optional but recommended
+            .header("HTTP-Referer", "https://github.com/your-repo/air") // Required by OpenRouter
+            .header("X-Title", "AIR - Rust AI Agent") // Optional but recommended
             .json(&payload)
             .send()
             .await;

@@ -6,6 +6,7 @@ pub mod web;
 pub mod command;
 pub mod screenshot;
 pub mod voice;
+pub mod knowledge;
 pub mod manager;
 
 use anyhow::Result;
@@ -42,4 +43,5 @@ pub use web::WebTool;
 pub use command::CommandTool;
 pub use screenshot::ScreenshotTool;
 pub use voice::VoiceTool;
+pub use knowledge::KnowledgeTool;
 pub use manager::ToolManager;

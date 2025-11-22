@@ -1,17 +1,12 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber;
 use std::io::{self, Write};
 
-mod agent;
-mod models;
-mod providers;
-mod config;
-mod tools;
-
-use agent::AIAgent;
-use config::Config;
+use air::agent::AIAgent;
+use air::config::Config;
+use air::tools;
 
 #[derive(Parser)]
 #[command(name = "air")]
@@ -25,6 +20,29 @@ struct Args {
     
     #[arg(short, long, help = "Verbose output")]
     verbose: bool,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Login to cloud providers (e.g., Gemini)
+    Login,
+    /// Memory and knowledge management
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryCommands {
+    /// Add a file to the knowledge base
+    Add {
+        /// Path to the file to index
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -44,7 +62,28 @@ async fn main() -> Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
-    info!("Starting RUAI Agent...");
+    // Handle subcommands first
+    match args.command {
+        Some(Commands::Login) => {
+            handle_login().await?;
+            return Ok(());
+        },
+        Some(Commands::Memory { command }) => {
+            match command {
+                MemoryCommands::Add { path } => {
+                    let tool = tools::KnowledgeTool::new()?;
+                    match tool.add_file(&path) {
+                        Ok(msg) => println!("✅ {}", msg),
+                        Err(e) => println!("❌ Failed to add file: {}", e),
+                    }
+                }
+            }
+            return Ok(());
+        },
+        None => {}
+    }
+
+    info!("Starting AIR Agent...");
 
     // Load configuration
     let config = Config::load()?;
@@ -62,8 +101,79 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn handle_login() -> Result<()> {
+    println!("\n🔑 Login Setup for Gemini (Google)");
+    println!("══════════════════════════════════");
+    println!("To use Gemini, you need an API key from Google AI Studio.");
+    println!();
+    println!("1. I will open the Google AI Studio page for you.");
+    println!("2. Click 'Create API key' or copy an existing one.");
+    println!("3. Come back here and paste the key.");
+    println!();
+
+    print!("👉 Press Enter to open browser...");
+    io::stdout().flush()?;
+    let mut buffer = String::new();
+    io::stdin().read_line(&mut buffer)?;
+
+    // Open browser
+    if let Err(e) = open::that("https://aistudio.google.com/app/apikey") {
+        println!("⚠️  Could not open browser automatically: {}", e);
+        println!("Please verify this URL manually: https://aistudio.google.com/app/apikey");
+    }
+
+    println!();
+    print!("🔑 Paste your Gemini API Key here: ");
+    io::stdout().flush()?;
+
+    let mut key = String::new();
+    io::stdin().read_line(&mut key)?;
+    let key = key.trim();
+
+    if key.is_empty() {
+        println!("❌ No key provided. Aborting.");
+        return Ok(());
+    }
+
+    // Read existing .env or create new
+    let env_path = std::env::current_dir()?.join(".env");
+    let mut env_content = String::new();
+
+    if env_path.exists() {
+        env_content = std::fs::read_to_string(&env_path)?;
+    }
+
+    // Update or append GEMINI_KEY
+    let mut new_lines = Vec::new();
+    let mut found = false;
+
+    for line in env_content.lines() {
+        if line.starts_with("GEMINI_KEY=") {
+            new_lines.push(format!("GEMINI_KEY={}", key));
+            found = true;
+        } else {
+            new_lines.push(line.to_string());
+        }
+    }
+
+    if !found {
+        new_lines.push(format!("GEMINI_KEY={}", key));
+    }
+
+    // Write back to .env
+    let mut file = std::fs::File::create(&env_path)?;
+    for line in new_lines {
+        writeln!(file, "{}", line)?;
+    }
+
+    println!("\n✅ Gemini API Key saved successfully to .env!");
+    println!("You can now use 'air' to chat with Gemini.");
+
+    Ok(())
+}
+
 async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
-    println!("\n🤖 RUAI Interactive Mode");
+    println!("\n🤖 AIR Interactive Mode");
     println!("════════════════════════");
     println!("💡 Type your questions and I'll help you!");
     println!("📝 Special commands:");
@@ -87,7 +197,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
                 // Handle special commands
                 match query.trim().to_lowercase().as_str() {
                     "exit" | "quit" | "q" => {
-                        println!("\n👋 Goodbye! Thanks for using RUAI!");
+                        println!("\n👋 Goodbye! Thanks for using AIR!");
                         break;
                     }
                     "help" | "h" => {
@@ -112,7 +222,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
                 }
                 
                 // Process the query
-                println!("\n🤖 RUAI: Processing your request...");
+                println!("\n🤖 AIR: Processing your request...");
                 
                 match agent.query_with_tools(&query).await {
                     Ok(response) => {
@@ -148,8 +258,8 @@ async fn run_single_query(agent: AIAgent, args: Args) -> Result<()> {
 }
 
 fn show_help() {
-    println!("\n📚 RUAI Help - Available Commands:");
-    println!("═══════════════════════════════════");
+    println!("\n📚 AIR Help - Available Commands:");
+    println!("══════════════════════════════════");
     println!("🔹 General Commands:");
     println!("   • exit, quit, q    - Exit the program");
     println!("   • help, h          - Show this help message");
@@ -191,16 +301,19 @@ fn show_help() {
     println!("   • recall [key]              - Retrieve stored information");
     println!("   • plan [goal]               - Create step-by-step plans");
     println!();
+    println!("🔹 Setup:");
+    println!("   • login                     - Configure API keys for cloud providers");
+    println!();
     println!("💡 Tips:");
-    println!("   • You can ask natural questions - RUAI will detect when to use tools");
+    println!("   • You can ask natural questions - AIR will detect when to use tools");
     println!("   • Commands are case-insensitive");
     println!("   • Cloud mode provides better quality but uses API calls");
     println!("═══════════════════════════════════════════════════════════════════");
 }
 
 async fn show_stats() -> Result<()> {
-    println!("\n📊 RUAI Usage Statistics:");
-    println!("════════════════════════");
+    println!("\n📊 AIR Usage Statistics:");
+    println!("═══════════════════════");
     println!("☁️  Cloud Models: Check configuration");
     println!("⚡ Status: Ready for queries");
     println!("💡 Tip: Use 'help' to see available commands");

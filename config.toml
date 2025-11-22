@@ -1,4 +1,4 @@
-# RUAI Configuration File
+# AIR Configuration File
 # This file contains settings for the AI Agent
 
 [local_model]
@@ -31,7 +31,7 @@ threads = 0
 [[cloud_providers]]
 name = "gemini"
 base_url = "https://generativelanguage.googleapis.com"
-model = "gemini-1.5-flash"
+model = "gemini-pro"
 max_tokens = 1000
 temperature = 0.7
 timeout_seconds = 30

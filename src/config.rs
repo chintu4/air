@@ -93,7 +93,7 @@ impl Default for Config {
                     name: "gemini".to_string(),
                     api_key: std::env::var("GEMINI_KEY").ok(),
                     base_url: "https://generativelanguage.googleapis.com".to_string(),
-                    model: "gemini-1.5-flash".to_string(),
+                    model: "gemini-pro".to_string(),
                     max_tokens: 1000,
                     temperature: 0.7,
                     timeout_seconds: 30,
