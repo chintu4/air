@@ -299,8 +299,20 @@ impl GeminiProvider {
         }
 
         // Sort models
-        // Priority: Version (descending), then Capability (Ultra > Pro > Flash > others)
+        // Priority: "gemini-2.0-flash" specifically, then Version (descending), then Capability
         models.sort_by(|a, b| {
+             // Priority 1: Prefer gemini-2.0-flash
+             if a == "gemini-2.0-flash" { return std::cmp::Ordering::Less; }
+             if b == "gemini-2.0-flash" { return std::cmp::Ordering::Greater; }
+
+             // Priority 2: Prefer stable versions over experimental/preview
+             let is_stable = |s: &str| !s.contains("exp") && !s.contains("preview");
+             match (is_stable(a), is_stable(b)) {
+                 (true, false) => return std::cmp::Ordering::Less,
+                 (false, true) => return std::cmp::Ordering::Greater,
+                 _ => {}
+             }
+
              // Extract version numbers roughly
              let get_version = |s: &str| -> f32 {
                  if let Some(start) = s.find("gemini-") {
