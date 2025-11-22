@@ -29,6 +29,11 @@ struct Args {
 enum Commands {
     /// Login to cloud providers (e.g., Gemini)
     Login,
+    /// Setup local environment (Ollama, models, etc.)
+    Setup {
+        #[arg(long, help = "Setup local models")]
+        local: bool,
+    },
     /// Memory and knowledge management
     Memory {
         #[command(subcommand)]
@@ -66,6 +71,14 @@ async fn main() -> Result<()> {
     match args.command {
         Some(Commands::Login) => {
             handle_login().await?;
+            return Ok(());
+        },
+        Some(Commands::Setup { local }) => {
+            if local {
+                handle_local_setup().await?;
+            } else {
+                println!("Please specify what to setup (e.g., --local)");
+            }
             return Ok(());
         },
         Some(Commands::Memory { command }) => {
@@ -168,6 +181,106 @@ async fn handle_login() -> Result<()> {
 
     println!("\n✅ Gemini API Key saved successfully to .env!");
     println!("You can now use 'air' to chat with Gemini.");
+
+    Ok(())
+}
+
+async fn handle_local_setup() -> Result<()> {
+    println!("\n🏠 Local Model Setup (Ollama)");
+    println!("═════════════════════════════");
+    println!("This will help you set up Ollama for private, local AI.");
+
+    // Check if Ollama is installed
+    println!("\n🔍 Checking for Ollama...");
+
+    let output = std::process::Command::new("ollama")
+        .arg("--version")
+        .output();
+
+    match output {
+        Ok(out) => {
+            if out.status.success() {
+                let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                println!("✅ Ollama is installed: {}", version);
+
+                // Check for models
+                println!("\n🔍 Checking for models...");
+                let list_output = std::process::Command::new("ollama")
+                    .arg("list")
+                    .output()?;
+
+                let list = String::from_utf8_lossy(&list_output.stdout);
+                if list.contains("llama3") || list.contains("mistral") {
+                     println!("✅ Found existing models!");
+                     println!("{}", list);
+                } else {
+                    println!("⚠️  No standard models found (looked for llama3/mistral).");
+                    println!("Downloading llama3 (8B) - this might take a while...");
+
+                    let status = std::process::Command::new("ollama")
+                        .args(&["pull", "llama3"])
+                        .status()?;
+
+                    if status.success() {
+                        println!("✅ Successfully pulled llama3!");
+                    } else {
+                        println!("❌ Failed to pull llama3.");
+                    }
+                }
+
+                // Update configuration to prefer local
+                println!("\n📝 Updating configuration to use local provider...");
+
+                let config_path = std::env::current_dir()?.join("config.toml");
+                if config_path.exists() {
+                     match std::fs::read_to_string(&config_path) {
+                        Ok(content) => {
+                             // Simple TOML modification using string replacement or just appending
+                             // A proper robust solution would use toml_edit, but for this task we want to enable local preference
+
+                             let mut new_config = content;
+                             // Ensure prefer_local_for_simple_queries is true
+                             if new_config.contains("prefer_local_for_simple_queries = false") {
+                                 new_config = new_config.replace("prefer_local_for_simple_queries = false", "prefer_local_for_simple_queries = true");
+                             }
+
+                             match std::fs::write(&config_path, new_config) {
+                                 Ok(_) => println!("✅ Configuration updated successfully."),
+                                 Err(e) => println!("❌ Failed to write config: {}", e),
+                             }
+                        },
+                        Err(e) => println!("❌ Failed to read config: {}", e),
+                     }
+                } else {
+                    println!("⚠️ config.toml not found. Skipping update.");
+                }
+
+                println!("\n🎉 You are ready to go! Run 'air --local-only' to force local mode.");
+
+            } else {
+                 println!("❌ Ollama found but returned error.");
+            }
+        }
+        Err(_) => {
+            println!("❌ Ollama is NOT installed or not in PATH.");
+            println!("\nPlease install Ollama from: https://ollama.com");
+            println!("After installing, run 'air setup --local' again.");
+
+            if cfg!(target_os = "windows") {
+                println!("\n💡 Tip: On Windows, you can download the installer directly.");
+                // We could attempt to download/install here, but better to let user handle it for now
+                if let Err(e) = open::that("https://ollama.com/download/windows") {
+                     println!("Could not open browser: {}", e);
+                }
+            } else if cfg!(target_os = "macos") {
+                 if let Err(e) = open::that("https://ollama.com/download/mac") {
+                     println!("Could not open browser: {}", e);
+                }
+            } else {
+                println!("Run: curl -fsSL https://ollama.com/install.sh | sh");
+            }
+        }
+    }
 
     Ok(())
 }

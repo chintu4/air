@@ -25,9 +25,6 @@ jobs:
     - name: Build Release
       run: cargo build --release --verbose
 
-    - name: Rename Binary
-      run: |
-        Move-Item -Path "target/release/ruai.exe" -Destination "target/release/air.exe"
 
     - name: Release
       uses: softprops/action-gh-release@v1

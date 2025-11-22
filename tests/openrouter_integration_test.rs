@@ -1,6 +1,6 @@
-// use ruai::models::{ModelProvider, QueryContext};
-// use ruai::providers::OpenRouterProvider;
-// use ruai::config::CloudProviderConfig;
+// use air::models::{ModelProvider, QueryContext};
+// use air::providers::OpenRouterProvider;
+// use air::config::CloudProviderConfig;
 // use std::time::Duration;
 
 // #[tokio::test]

@@ -1,5 +1,5 @@
-// use ruai::agent::AIAgent;
-// use ruai::config::{Config, LocalModelConfig, CloudProviderConfig, PerformanceConfig};
+// use air::agent::AIAgent;
+// use air::config::{Config, LocalModelConfig, CloudProviderConfig, PerformanceConfig};
 // use std::path::PathBuf;
 // use tempfile::NamedTempFile;
 // use std::io::Write;
