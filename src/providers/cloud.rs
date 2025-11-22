@@ -4,10 +4,18 @@ use async_trait::async_trait;
 use anyhow::{Result, anyhow};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{warn, error, debug, info};
+use serde::{Serialize, Deserialize};
+use std::path::PathBuf;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct GeminiCache {
+    last_updated: u64,
+    models: Vec<String>,
+}
 
 pub struct OpenAIProvider {
     config: CloudProviderConfig,
@@ -257,13 +265,35 @@ impl GeminiProvider {
         })
     }
 
+    fn get_cache_file_path(&self) -> Option<PathBuf> {
+        dirs::cache_dir().map(|d| d.join("air").join("gemini_models.json"))
+    }
+
     async fn fetch_and_sort_models(&self, api_key: &str) -> Result<Vec<String>> {
-        // Check cache first
+        // Check in-memory cache first
         {
             let cache = self.cached_models.lock().await;
             if let Some(models) = cache.as_ref() {
-                debug!("Using cached Gemini models: {:?}", models);
+                debug!("Using in-memory cached Gemini models: {:?}", models);
                 return Ok(models.clone());
+            }
+        }
+
+        // Check persistent cache
+        if let Some(cache_path) = self.get_cache_file_path() {
+            if cache_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&cache_path) {
+                    if let Ok(cache_data) = serde_json::from_str::<GeminiCache>(&content) {
+                        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                        // Cache valid for 7 days (604800 seconds)
+                        if now - cache_data.last_updated < 604800 {
+                            info!("Using persistent cached Gemini models (age < 7 days)");
+                            let mut cache = self.cached_models.lock().await;
+                            *cache = Some(cache_data.models.clone());
+                            return Ok(cache_data.models);
+                        }
+                    }
+                }
             }
         }
 
@@ -299,8 +329,20 @@ impl GeminiProvider {
         }
 
         // Sort models
-        // Priority: Version (descending), then Capability (Ultra > Pro > Flash > others)
+        // Priority: "gemini-2.0-flash" specifically, then Version (descending), then Capability
         models.sort_by(|a, b| {
+             // Priority 1: Prefer gemini-2.0-flash
+             if a == "gemini-2.0-flash" { return std::cmp::Ordering::Less; }
+             if b == "gemini-2.0-flash" { return std::cmp::Ordering::Greater; }
+
+             // Priority 2: Prefer stable versions over experimental/preview
+             let is_stable = |s: &str| !s.contains("exp") && !s.contains("preview");
+             match (is_stable(a), is_stable(b)) {
+                 (true, false) => return std::cmp::Ordering::Less,
+                 (false, true) => return std::cmp::Ordering::Greater,
+                 _ => {}
+             }
+
              // Extract version numbers roughly
              let get_version = |s: &str| -> f32 {
                  if let Some(start) = s.find("gemini-") {
@@ -333,9 +375,29 @@ impl GeminiProvider {
 
         info!("Fetched and sorted Gemini models: {:?}", models);
 
-        // Update cache
+        // Update in-memory cache
         let mut cache = self.cached_models.lock().await;
         *cache = Some(models.clone());
+
+        // Update persistent cache
+        if let Some(cache_path) = self.get_cache_file_path() {
+            if let Some(parent) = cache_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+
+            let cache_data = GeminiCache {
+                last_updated: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                models: models.clone(),
+            };
+
+            if let Ok(content) = serde_json::to_string(&cache_data) {
+                if let Err(e) = std::fs::write(&cache_path, content) {
+                    warn!("Failed to write Gemini cache file: {}", e);
+                } else {
+                    info!("Saved Gemini models to cache: {:?}", cache_path);
+                }
+            }
+        }
 
         Ok(models)
     }

@@ -127,60 +127,165 @@ impl AIAgent {
         })
     }
     
-    /// Enhanced query with tool detection and execution
+    /// ReAct-style query loop (Think -> Act -> Observe)
     pub async fn query_with_tools(&self, prompt: &str) -> Result<ModelResponse> {
-        info!("🔧 Processing query with tool detection");
+        info!("🧠 Starting ReAct workflow for: {}", prompt);
+
+        let system_prompt = r#"You are AIR, an intelligent AI agent that uses a ReAct (Reasoning and Acting) workflow.
+You have access to the following tools:
+
+1. filesystem
+   - read_file(path: str): Read content of a file
+   - write_file(path: str, content: str): Create or overwrite a file
+   - list_directory(path: str): List files in a directory
+2. calculator
+   - calculate(expression: str): Evaluate a math expression
+3. web
+   - fetch(url: str): Fetch content from a URL
+4. command
+   - execute(command: str): Run a shell command
+5. planner
+   - create_task(title: str, description: str): Create a new task
+6. memory
+   - search_conversations(query: str): Search past conversations
+
+To solve a problem, you must interleave Thought, Action, and Observation.
+Use the following format:
+
+Thought: [Your reasoning about what to do next]
+Action: [A JSON object with "tool", "function", and "arguments"]
+Observation: [The result of the tool - I will provide this]
+... (repeat Thought/Action/Observation as needed)
+Final Answer: [Your final response to the user]
+
+Example Action:
+Action: { "tool": "filesystem", "function": "read_file", "arguments": { "path": "test.txt" } }
+
+If you can answer directly without tools, just provide the Final Answer.
+Start your response with 'Thought:'.
+"#;
+
+        let mut full_history = format!("{}\n\nUser Query: {}\n", system_prompt, prompt);
+        let mut total_tokens = 0;
+        let mut total_time = 0;
+        let max_steps = 10;
         
-        // First, check if this query should use tools
-        if let Some((tool_name, function, args)) = self.tool_manager.detect_tool_intent(prompt) {
-            info!("🎯 Detected tool usage: {} -> {}", tool_name, function);
+        for step in 0..max_steps {
+            debug!("🔄 ReAct Step {}/{}", step + 1, max_steps);
+
+            // 1. Ask LLM for Thought/Action
+            let response = self.query(&full_history).await?;
+            total_tokens += response.tokens_used;
+            total_time += response.response_time_ms;
+
+            let content = response.content.trim();
+            info!("🤖 AI Step {}: {}", step + 1, content);
             
-            match self.tool_manager.execute_tool(&tool_name, &function, args).await {
-                Ok(tool_result) => {
-                    if tool_result.success {
-                        info!("✅ Tool execution successful");
-                        
-                        // For simple tool results, return directly
-                        if tool_name == "web" || tool_name == "filesystem" {
-                            let mut successful_queries = self.successful_queries.lock().await;
-                            *successful_queries += 1;
-                            return Ok(ModelResponse {
-                                content: format!("🔧 Tool Result ({}): \n\n{}", tool_name, tool_result.result),
-                                model_used: format!("Tool-{}", tool_name),
-                                tokens_used: 0,
-                                response_time_ms: 0,
-                                confidence_score: Some(1.0),
-                            });
+            // Append AI response to history
+            full_history.push_str("\n");
+            full_history.push_str(content);
+
+            // 2. Check for Final Answer
+            if content.contains("Final Answer:") {
+                let answer = content.split("Final Answer:").last().unwrap_or(content).trim();
+                return Ok(ModelResponse {
+                    content: answer.to_string(),
+                    model_used: response.model_used,
+                    tokens_used: total_tokens,
+                    response_time_ms: total_time,
+                    confidence_score: response.confidence_score,
+                });
+            }
+
+            // 3. Extract Action (JSON)
+            // Look for "Action: { ... }" block
+            let action_json = if let Some(start_idx) = content.find("Action: {") {
+                 // Basic bracket counting to find end of JSON
+                 let json_start = start_idx + 8; // skip "Action: "
+                 let rest = &content[json_start..];
+                 let mut depth = 0;
+                 let mut end_idx = 0;
+                 for (i, c) in rest.chars().enumerate() {
+                     if c == '{' { depth += 1; }
+                     if c == '}' { depth -= 1; }
+                     if depth == 0 {
+                         end_idx = i + 1;
+                         break;
+                     }
+                 }
+
+                 if end_idx > 0 {
+                     Some(&rest[..end_idx])
+                 } else {
+                     None
+                 }
+            } else {
+                // Try finding just a JSON block if "Action:" prefix is missing or malformed
+                 if let Some(start) = content.find('{') {
+                     if let Some(end) = content.rfind('}') {
+                         if end > start {
+                             Some(&content[start..=end])
+                         } else { None }
+                     } else { None }
+                 } else { None }
+            };
+
+            if let Some(json_str) = action_json {
+                // 4. Execute Tool
+                match serde_json::from_str::<serde_json::Value>(json_str) {
+                    Ok(tool_call) => {
+                        if let (Some(tool), Some(func), Some(args)) = (
+                            tool_call.get("tool").and_then(|v| v.as_str()),
+                            tool_call.get("function").and_then(|v| v.as_str()),
+                            tool_call.get("arguments")
+                        ) {
+                            info!("🛠️ Executing: {} -> {}", tool, func);
+                            let result = self.tool_manager.execute_tool(tool, func, args.clone()).await;
+
+                            let observation = match result {
+                                Ok(res) => format!("Observation: {}", res.result),
+                                Err(e) => format!("Observation: Error: {}", e),
+                            };
+
+                            info!("👀 {}", observation);
+                            full_history.push_str("\n");
+                            full_history.push_str(&observation);
+                        } else {
+                            let msg = "Observation: Error: Invalid JSON structure. Need tool, function, arguments.";
+                            full_history.push_str("\n");
+                            full_history.push_str(msg);
                         }
-                        
-                        // For other tools, combine with AI response
-                        let enhanced_prompt = format!(
-                            "Based on this tool result: {}\n\nOriginal query: {}\n\nPlease provide a helpful response:",
-                            tool_result.result, prompt
-                        );
-                        
-                        let mut ai_response = self.query(&enhanced_prompt).await?;
-                        ai_response.content = format!(
-                            "🔧 Tool Result:\n{}\n\n🤖 AI Analysis:\n{}", 
-                            tool_result.result, 
-                            ai_response.content
-                        );
-                        return Ok(ai_response);
-                        
-                    } else {
-                        warn!("❌ Tool execution failed: {}", tool_result.result);
-                        // Fall through to regular AI processing
+                    },
+                    Err(e) => {
+                        // JSON parse error
+                        let msg = format!("Observation: Error parsing JSON: {}", e);
+                        full_history.push_str("\n");
+                        full_history.push_str(&msg);
                     }
                 }
-                Err(e) => {
-                    warn!("❌ Tool execution error: {}", e);
-                    // Fall through to regular AI processing
+            } else {
+                // No action found, but no final answer?
+                // If the AI is just "thinking" without acting, let it continue, but warn if loop
+                if !content.contains("Thought:") {
+                     // Force it to conclude if it's rambling
+                     full_history.push_str("\nObservation: Please provide an Action or Final Answer.");
+                } else {
+                    // Just a thought, assume it's building up to an action in next turn?
+                    // Actually, typically Thought and Action come together.
+                    // If we see Thought but no Action, prompt for Action.
+                    full_history.push_str("\nObservation: You provided a Thought. Now please provide an Action or Final Answer.");
                 }
             }
         }
         
-        // No tool detected or tool failed, use regular AI processing
-        self.query(prompt).await
+        // If loop exhausted
+        Ok(ModelResponse {
+            content: "I pondered the problem for too long and reached the step limit.".to_string(),
+            model_used: "System".to_string(),
+            tokens_used: total_tokens,
+            response_time_ms: total_time,
+            confidence_score: Some(0.0),
+        })
     }
     
     /// Query the best available provider (local or cloud)
@@ -243,9 +348,8 @@ impl AIAgent {
         for provider in available_providers {
             debug!("Trying cloud provider: {}", provider.name());
             match provider.generate(context).await {
-                Ok(mut response) => {
+                Ok(response) => {
                     info!("✅ {} succeeded in {}ms", provider.name(), response.response_time_ms);
-                    response.content = format!("☁️  {} Response:\n{}", provider.name(), response.content);
                     return Ok(response);
                 }
                 Err(e) => {
