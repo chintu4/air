@@ -143,3 +143,8 @@ For production deployment, you might want to:
    - Tune quality thresholds based on your use case
 
 This gives you the best approach for faster execution while maintaining quality through intelligent model routing!
+## Developer
+Author : chintu sharma
+github: chintu4
+### LICENCE
+MIT
