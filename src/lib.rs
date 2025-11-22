@@ -1,4 +1,4 @@
-//! # RUAI - Rust AI Agent Library
+//! # AIR - Rust AI Agent Library
 //! 
 //! A high-performance AI agent system supporting cloud models.
 //! 
@@ -11,7 +11,7 @@
 //! ## Usage
 //! 
 //! ```rust,no_run
-//! use ruai::{agent::AIAgent, config::Config};
+//! use air::{agent::AIAgent, config::Config};
 //! 
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {
@@ -30,6 +30,7 @@ pub mod config;
 pub mod models;
 pub mod providers;
 pub mod tools;
+pub mod rag;
 
 // Re-export commonly used types for convenience
 pub use agent::AIAgent;

@@ -22,7 +22,7 @@ impl VoiceTool {
         });
         
         let temp_dir = std::env::temp_dir()
-            .join("ruai_voice")
+            .join("air_voice")
             .to_string_lossy()
             .to_string();
         

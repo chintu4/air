@@ -4,17 +4,12 @@ use tracing::info;
 use tracing_subscriber;
 use std::io::{self, Write};
 
-mod agent;
-mod models;
-mod providers;
-mod config;
-mod tools;
-
-use agent::AIAgent;
-use config::Config;
+use air::agent::AIAgent;
+use air::config::Config;
+use air::tools;
 
 #[derive(Parser)]
-#[command(name = "ruai")]
+#[command(name = "air")]
 #[command(about = "AI Agent with cloud model support")]
 struct Args {
     #[arg(short, long, help = "Input prompt for the AI")]
@@ -34,6 +29,20 @@ struct Args {
 enum Commands {
     /// Login to cloud providers (e.g., Gemini)
     Login,
+    /// Memory and knowledge management
+    Memory {
+        #[command(subcommand)]
+        command: MemoryCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryCommands {
+    /// Add a file to the knowledge base
+    Add {
+        /// Path to the file to index
+        path: String,
+    },
 }
 
 #[tokio::main]
@@ -54,12 +63,27 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     // Handle subcommands first
-    if let Some(Commands::Login) = args.command {
-        handle_login().await?;
-        return Ok(());
+    match args.command {
+        Some(Commands::Login) => {
+            handle_login().await?;
+            return Ok(());
+        },
+        Some(Commands::Memory { command }) => {
+            match command {
+                MemoryCommands::Add { path } => {
+                    let tool = tools::KnowledgeTool::new()?;
+                    match tool.add_file(&path) {
+                        Ok(msg) => println!("✅ {}", msg),
+                        Err(e) => println!("❌ Failed to add file: {}", e),
+                    }
+                }
+            }
+            return Ok(());
+        },
+        None => {}
     }
 
-    info!("Starting RUAI Agent...");
+    info!("Starting AIR Agent...");
 
     // Load configuration
     let config = Config::load()?;
@@ -149,7 +173,7 @@ async fn handle_login() -> Result<()> {
 }
 
 async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
-    println!("\n🤖 RUAI Interactive Mode");
+    println!("\n🤖 AIR Interactive Mode");
     println!("════════════════════════");
     println!("💡 Type your questions and I'll help you!");
     println!("📝 Special commands:");
@@ -173,7 +197,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
                 // Handle special commands
                 match query.trim().to_lowercase().as_str() {
                     "exit" | "quit" | "q" => {
-                        println!("\n👋 Goodbye! Thanks for using RUAI!");
+                        println!("\n👋 Goodbye! Thanks for using AIR!");
                         break;
                     }
                     "help" | "h" => {
@@ -198,7 +222,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
                 }
                 
                 // Process the query
-                println!("\n🤖 RUAI: Processing your request...");
+                println!("\n🤖 AIR: Processing your request...");
                 
                 match agent.query_with_tools(&query).await {
                     Ok(response) => {
@@ -234,8 +258,8 @@ async fn run_single_query(agent: AIAgent, args: Args) -> Result<()> {
 }
 
 fn show_help() {
-    println!("\n📚 RUAI Help - Available Commands:");
-    println!("═══════════════════════════════════");
+    println!("\n📚 AIR Help - Available Commands:");
+    println!("══════════════════════════════════");
     println!("🔹 General Commands:");
     println!("   • exit, quit, q    - Exit the program");
     println!("   • help, h          - Show this help message");
@@ -281,15 +305,15 @@ fn show_help() {
     println!("   • login                     - Configure API keys for cloud providers");
     println!();
     println!("💡 Tips:");
-    println!("   • You can ask natural questions - RUAI will detect when to use tools");
+    println!("   • You can ask natural questions - AIR will detect when to use tools");
     println!("   • Commands are case-insensitive");
     println!("   • Cloud mode provides better quality but uses API calls");
     println!("═══════════════════════════════════════════════════════════════════");
 }
 
 async fn show_stats() -> Result<()> {
-    println!("\n📊 RUAI Usage Statistics:");
-    println!("════════════════════════");
+    println!("\n📊 AIR Usage Statistics:");
+    println!("═══════════════════════");
     println!("☁️  Cloud Models: Check configuration");
     println!("⚡ Status: Ready for queries");
     println!("💡 Tip: Use 'help' to see available commands");

@@ -27,6 +27,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "air"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.21.7",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "chrono",
+ "clap",
+ "dotenv",
+ "futures",
+ "hf-hub",
+ "num_cpus",
+ "open",
+ "rand 0.8.5",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokenizers",
+ "tokio",
+ "tokio-test",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2203,38 +2235,6 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "ruai"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.21.7",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "chrono",
- "clap",
- "dotenv",
- "futures",
- "hf-hub",
- "num_cpus",
- "open",
- "rand 0.8.5",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokenizers",
- "tokio",
- "tokio-test",
- "toml",
- "tracing",
- "tracing-subscriber",
- "uuid",
 ]
 
 [[package]]
