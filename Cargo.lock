@@ -38,6 +38,7 @@ dependencies = [
  "candle-transformers",
  "chrono",
  "clap",
+ "dirs",
  "dotenv",
  "futures",
  "hf-hub",

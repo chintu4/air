@@ -3,8 +3,30 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    pub local_model: LocalModelConfig,
     pub cloud_providers: Vec<CloudProviderConfig>,
     pub performance: PerformanceConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalModelConfig {
+    pub model_path: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub context_length: u32,
+    pub threads: u32,
+}
+
+impl Default for LocalModelConfig {
+    fn default() -> Self {
+        Self {
+            model_path: "C:\\models\\tinyllama-1.1b-chat-v1.0.Q2_K.gguf".to_string(),
+            max_tokens: 512,
+            temperature: 0.7,
+            context_length: 2048,
+            threads: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +130,7 @@ impl Default for Config {
                     timeout_seconds: 30,
                 },
             ],
+            local_model: LocalModelConfig::default(),
             performance: PerformanceConfig {
                 fallback_threshold_ms: 3000,
                 quality_threshold: 0.8,
