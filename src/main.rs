@@ -221,6 +221,36 @@ async fn handle_local_setup() -> Result<()> {
         }
     }
 
+    // Check/Download Tokenizer
+    let tokenizer_filename = "tokenizer.json";
+    let tokenizer_path = models_dir.join(tokenizer_filename);
+
+    if !tokenizer_path.exists() {
+         println!("Downloading tokenizer (small)...");
+         let url = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json";
+         let response = reqwest::get(url).await?;
+
+         if response.status().is_success() {
+             let content = response.bytes().await?;
+             std::fs::write(&tokenizer_path, content)?;
+             println!("✅ Successfully downloaded tokenizer to: {:?}", tokenizer_path);
+         } else {
+             println!("❌ Failed to download tokenizer: {}", response.status());
+         }
+
+         // Try to get config as well for template
+         let config_filename = "tokenizer_config.json";
+         let config_path = models_dir.join(config_filename);
+         let config_url = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer_config.json";
+         if let Ok(res) = reqwest::get(config_url).await {
+             if res.status().is_success() {
+                  let content = res.bytes().await?;
+                  std::fs::write(&config_path, content)?;
+                  println!("✅ Successfully downloaded tokenizer config.");
+             }
+         }
+    }
+
     // Update configuration to point to the model
     println!("\n📝 Updating configuration...");
 

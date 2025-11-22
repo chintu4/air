@@ -5,6 +5,14 @@ on:
     tags:
       - 'v*'
 
+  # Enables the manual "Run Workflow" button
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual deploy'
+        required: false
+        default: 'Manual override'
+
 env:
   CARGO_TERM_COLOR: always
 
