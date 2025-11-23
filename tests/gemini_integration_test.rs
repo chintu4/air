@@ -74,13 +74,13 @@
 //     assert_eq!(provider.name(), "Gemini");
 // }
 
-// // Integration test - only runs if GEMINI_KEY environment variable is set
+// // Integration test - only runs if GEMINI_API_KEY environment variable is set
 // #[tokio::test]
 // #[ignore = "requires actual API key"]
 // async fn test_gemini_real_api_call() {
-//     let api_key = std::env::var("GEMINI_KEY").ok();
+//     let api_key = std::env::var("GEMINI_API_KEY").ok();
 //     if api_key.is_none() {
-//         println!("Skipping real API test - no GEMINI_KEY environment variable");
+//         println!("Skipping real API test - no GEMINI_API_KEY environment variable");
 //         return;
 //     }
 
