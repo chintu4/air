@@ -69,7 +69,7 @@ impl Config {
                         }
                     }
                     "gemini" => {
-                        if let Ok(key) = std::env::var("GEMINI_KEY") {
+                        if let Ok(key) = std::env::var("GEMINI_API_KEY") {
                             provider.api_key = Some(key);
                         }
                     }
@@ -113,7 +113,7 @@ impl Default for Config {
                 // },
                 CloudProviderConfig {
                     name: "gemini".to_string(),
-                    api_key: std::env::var("GEMINI_KEY").ok(),
+                    api_key: std::env::var("GEMINI_API_KEY").ok(),
                     base_url: "https://generativelanguage.googleapis.com".to_string(),
                     model: "gemini-pro".to_string(),
                     max_tokens: 1000,

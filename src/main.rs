@@ -52,8 +52,13 @@ enum MemoryCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load environment variables from .env file
-    dotenv::dotenv().ok();
+    // Load environment variables from AppData .env file
+    if let Some(config_dir) = dirs::config_dir() {
+        let env_path = config_dir.join("air").join(".env");
+        if env_path.exists() {
+            dotenv::from_path(env_path).ok();
+        }
+    }
     
     let args = Args::parse();
     
@@ -148,21 +153,28 @@ async fn handle_login() -> Result<()> {
         return Ok(());
     }
 
-    // Read existing .env or create new
-    let env_path = std::env::current_dir()?.join(".env");
+    // Determine config directory
+    let config_dir = dirs::config_dir().ok_or(anyhow::anyhow!("Could not find config directory"))?;
+    let air_dir = config_dir.join("air");
+
+    if !air_dir.exists() {
+        std::fs::create_dir_all(&air_dir)?;
+    }
+
+    let env_path = air_dir.join(".env");
     let mut env_content = String::new();
 
     if env_path.exists() {
         env_content = std::fs::read_to_string(&env_path)?;
     }
 
-    // Update or append GEMINI_KEY
+    // Update or append GEMINI_API_KEY
     let mut new_lines = Vec::new();
     let mut found = false;
 
     for line in env_content.lines() {
-        if line.starts_with("GEMINI_KEY=") {
-            new_lines.push(format!("GEMINI_KEY={}", key));
+        if line.starts_with("GEMINI_API_KEY=") {
+            new_lines.push(format!("GEMINI_API_KEY={}", key));
             found = true;
         } else {
             new_lines.push(line.to_string());
@@ -170,7 +182,7 @@ async fn handle_login() -> Result<()> {
     }
 
     if !found {
-        new_lines.push(format!("GEMINI_KEY={}", key));
+        new_lines.push(format!("GEMINI_API_KEY={}", key));
     }
 
     // Write back to .env
@@ -179,7 +191,7 @@ async fn handle_login() -> Result<()> {
         writeln!(file, "{}", line)?;
     }
 
-    println!("\n✅ Gemini API Key saved successfully to .env!");
+    println!("\n✅ Gemini API Key saved successfully to {:?}", env_path);
     println!("You can now use 'air' to chat with Gemini.");
 
     Ok(())
