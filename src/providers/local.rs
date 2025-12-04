@@ -1,50 +1,30 @@
-use anyhow::{Result, anyhow, Error};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::path::PathBuf;
-use tracing::{info, warn, debug};
-use std::time::Instant;
 use std::sync::{Arc, Mutex};
 
 use crate::models::{ModelProvider, ModelResponse, QueryContext};
 use crate::config::LocalModelConfig;
-
-use candle_core::{Device, Tensor, DType};
-use candle_transformers::models::quantized_llama::ModelWeights;
-use candle_transformers::generation::LogitsProcessor;
-use tokenizers::Tokenizer;
-use hf_hub::api::sync::Api;
-
-struct LocalState {
-    model: Option<ModelWeights>,
-    tokenizer: Option<Tokenizer>,
-}
+use crate::providers::gguf_model::GGUFModel;
 
 pub struct LocalProvider {
     config: LocalModelConfig,
-    state: Arc<Mutex<LocalState>>,
+    // Use Arc<Mutex<Option<GGUFModel>>> to allow sharing and lazy loading
+    // GGUFModel is internal to providers
+    model: Arc<Mutex<Option<GGUFModel>>>,
 }
 
 impl LocalProvider {
     pub fn new(config: LocalModelConfig) -> Result<Self> {
-        let provider = Self {
+        Ok(Self {
             config,
-            state: Arc::new(Mutex::new(LocalState {
-                model: None,
-                tokenizer: None,
-            })),
-        };
-
-        // Attempt to load immediately to ensure readiness, but don't fail if just missing file (setup might happen later)
-        // actually, for 'air', if we configured it, we expect it to work.
-        // But `new` is sync. Let's spawn a thread or just do it lazily?
-        // Let's do it lazily in generate, or check existence now.
-
-        Ok(provider)
+            model: Arc::new(Mutex::new(None)),
+        })
     }
 
     fn ensure_loaded(&self) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
-        if state.model.is_some() {
+        let mut model_guard = self.model.lock().unwrap();
+        if model_guard.is_some() {
             return Ok(());
         }
 
@@ -53,46 +33,10 @@ impl LocalProvider {
             return Err(anyhow!("Model file not found at: {:?}. Run 'air setup --local' first.", model_path));
         }
 
-        info!("Loading local model from {:?}...", model_path);
-        let start = Instant::now();
-
-        // Load model
-        let mut file = std::fs::File::open(&model_path)?;
-        let model = candle_transformers::models::quantized_llama::ModelWeights::from_gguf(
-            candle_core::quantized::gguf_file::Content::read(&mut file)?,
-            &mut file,
-            &Device::Cpu
-        )?;
-
-        // Load tokenizer
-        // We try to find tokenizer.json in the same folder, or ~/.air/models/tokenizer.json
-        // Or fetch from HF.
-        let tokenizer = match load_tokenizer(&model_path) {
-            Ok(t) => t,
-            Err(e) => {
-                warn!("Could not find local tokenizer.json: {}. Attempting download...", e);
-                let api = Api::new()?;
-                let repo = api.model("TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string());
-                let path = repo.get("tokenizer.json")?;
-                Tokenizer::from_file(path).map_err(Error::msg)?
-            }
-        };
-
-        state.model = Some(model);
-        state.tokenizer = Some(tokenizer);
-
-        info!("Model loaded in {:.2?}", start.elapsed());
+        let model = GGUFModel::load(&model_path)?;
+        *model_guard = Some(model);
         Ok(())
     }
-}
-
-fn load_tokenizer(model_path: &PathBuf) -> Result<Tokenizer> {
-    let parent = model_path.parent().unwrap();
-    let json_path = parent.join("tokenizer.json");
-    if json_path.exists() {
-        return Tokenizer::from_file(json_path).map_err(Error::msg);
-    }
-    Err(anyhow!("tokenizer.json not found"))
 }
 
 #[async_trait]
@@ -116,53 +60,22 @@ impl ModelProvider for LocalProvider {
     async fn generate(&self, context: &QueryContext) -> Result<ModelResponse> {
         self.ensure_loaded()?;
 
-        // We clone the state wrapper to move into the blocking task
-        let state_arc = self.state.clone();
+        let model_arc = self.model.clone();
         let prompt = context.prompt.clone();
-        let temperature = context.temperature as f64; // candle expects f64
+        let temperature = context.temperature as f64;
         let max_tokens = context.max_tokens as usize;
 
-        // Run inference in a blocking thread to avoid blocking the async runtime
+        // Run inference in a blocking thread
         let result = tokio::task::spawn_blocking(move || {
-            let mut state = state_arc.lock().unwrap();
-            // We need to split the borrow
-            let tokenizer = state.tokenizer.clone().unwrap();
-            let model = state.model.as_mut().unwrap();
+            let mut model_guard = model_arc.lock().unwrap();
+            let model = model_guard.as_mut().ok_or(anyhow!("Model not loaded"))?;
 
-            // Format prompt for TinyLlama Chat
-            // <|user|>\n{prompt}</s>\n<|assistant|>
-            let formatted_prompt = format!("<|user|>\n{}</s>\n<|assistant|>", prompt);
-
-            let tokens = tokenizer.encode(formatted_prompt, true).map_err(Error::msg)?;
-            let tokens = tokens.get_ids();
-
-            let mut logits_processor = LogitsProcessor::new(299792458, Some(temperature), None);
-            let mut generated_tokens = Vec::new();
-            let mut current_tokens = tokens.to_vec();
-
-            let start_gen = Instant::now();
-
-            for _ in 0..max_tokens {
-                let input = Tensor::new(current_tokens.as_slice(), &Device::Cpu)?.unsqueeze(0)?;
-                let logits = model.forward(&input, current_tokens.len())?;
-                let logits = logits.squeeze(0)?;
-
-                let next_token = logits_processor.sample(&logits)?;
-                generated_tokens.push(next_token);
-                current_tokens.push(next_token);
-
-                if next_token == tokenizer.token_to_id("</s>").unwrap_or(2) {
-                    break;
-                }
-            }
-
-            let response_text = tokenizer.decode(&generated_tokens, true).map_err(Error::msg)?;
-            let time_ms = start_gen.elapsed().as_millis() as u64;
+            let (response_text, tokens_used, time_ms) = model.generate(&prompt, max_tokens, temperature)?;
 
             Ok::<ModelResponse, anyhow::Error>(ModelResponse {
                 content: response_text,
                 model_used: "TinyLlama-1.1B-Quantized".to_string(),
-                tokens_used: generated_tokens.len() as u32,
+                tokens_used,
                 response_time_ms: time_ms,
                 confidence_score: None,
             })
