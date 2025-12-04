@@ -1,0 +1,23 @@
+#!/usr/bin/env pwsh
+# Build script for AIR
+
+Write-Host "🦀 Building AIR - Rust AI Agent" -ForegroundColor Green
+Write-Host "=================================" -ForegroundColor Green
+
+Write-Host "📦 Building release version..." -ForegroundColor Yellow
+cargo build --release
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "✅ Build successful!" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "🚀 Ready to run:" -ForegroundColor Cyan
+    Write-Host "  .\target\release\air.exe --prompt 'Your question here'" -ForegroundColor White
+    Write-Host ""
+    Write-Host "📋 Quick commands:" -ForegroundColor Blue
+    Write-Host "  Local only:  .\target\release\air.exe -p 'Hello' -l" -ForegroundColor White
+    Write-Host "  Cloud only:  .\target\release\air.exe -p 'Complex task' -c" -ForegroundColor White
+    Write-Host "  Smart route: .\target\release\air.exe -p 'Your prompt'" -ForegroundColor White
+    Write-Host "  Verbose:     .\target\release\air.exe -p 'Your prompt' -v" -ForegroundColor White
+} else {
+    Write-Host "❌ Build failed!" -ForegroundColor Red
+}
