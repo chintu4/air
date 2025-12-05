@@ -41,6 +41,7 @@ dirs = "5.0"
 md5 = "0.8.0"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 tokenizer = "0.1.2"
+langchain-rust = "4.6.0"
 
 [dev-dependencies]
 tempfile = "3.8"
