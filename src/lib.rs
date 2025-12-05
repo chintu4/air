@@ -18,7 +18,7 @@
 //!     let config = Config::load()?;
 //!     let agent = AIAgent::new(config).await?;
 //!     
-//!     let response = agent.query("What is 2+2?").await?;
+//!     let response = agent.query_with_tools("What is 2+2?").await?;
 //!     println!("Response: {}", response.content);
 //!     
 //!     Ok(())

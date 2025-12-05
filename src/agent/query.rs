@@ -114,7 +114,7 @@ impl QueryProcessor {
         info!("🔄 Processing query with smart fallback strategy");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())))?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
@@ -192,7 +192,7 @@ impl QueryProcessor {
         info!("🏠 Using local model only");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())))?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
@@ -223,7 +223,7 @@ impl QueryProcessor {
         info!("🌤️  Using cloud models only");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())))?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
@@ -255,7 +255,7 @@ impl QueryProcessor {
         info!("🏠 Using local model in pure mode (no templates)");
 
         // Build enhanced prompt with context (minimal for pure mode)
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())))?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
@@ -360,7 +360,7 @@ impl QueryProcessor {
     /// Provide graceful fallback when all providers fail
     async fn provide_graceful_fallback(&self, prompt: &str, memory_manager: &MemoryManager) -> Result<ModelResponse> {
         // Try to find similar past responses
-        if let Ok(recent_convs) = memory_manager.get_recent_conversations(10) {
+        if let Ok(recent_convs) = memory_manager.get_recent_conversations(10).await {
             for (user_input, ai_response, _) in recent_convs {
                 if self.is_similar_query(prompt, &user_input) {
                     info!("📋 Found similar past response, using as fallback");
