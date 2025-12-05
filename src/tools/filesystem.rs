@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::fs;
 use tracing::info;
+use std::io::{self, Write};
 
 pub struct FileSystemTool {
     base_directory: String,
@@ -25,8 +26,6 @@ impl FileSystemTool {
     }
     
     fn is_safe_path(&self, path: &str) -> bool {
-        // Allow all paths - restrictions removed
-        // Only basic validation for obviously malicious patterns
         !path.contains('\0') // Null bytes are always invalid
     }
     
@@ -37,13 +36,25 @@ impl FileSystemTool {
         
         let path_buf = Path::new(path);
         
-        // If it's an absolute path, use it directly
         if path_buf.is_absolute() {
             Ok(path_buf.to_path_buf())
         } else {
-            // If it's relative, join with base directory
             Ok(Path::new(&self.base_directory).join(path))
         }
+    }
+
+    fn ask_confirmation(&self, action: &str, path: &str) -> bool {
+        // In some environments (e.g. tests), stdin might not be interactive.
+        // But for this CLI tool, we assume it is.
+        print!("⚠️  Confirmation required: Do you want to {} '{}'? [y/N] ", action, path);
+        io::stdout().flush().unwrap_or(());
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_ok() {
+            let response = input.trim().to_lowercase();
+            return response == "y" || response == "yes";
+        }
+        false
     }
 }
 
@@ -105,10 +116,17 @@ impl Tool for FileSystemTool {
                 let content = args["content"].as_str()
                     .ok_or_else(|| anyhow!("Missing 'content' parameter"))?;
                 
+                if !self.ask_confirmation("WRITE to file", path) {
+                     return Ok(ToolResult {
+                        success: false,
+                        result: "Operation cancelled by user.".to_string(),
+                        metadata: None,
+                    });
+                }
+
                 info!("Writing file: {}", path);
                 let full_path = self.get_full_path(path)?;
                 
-                // Create parent directories if they don't exist
                 if let Some(parent) = full_path.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -239,6 +257,14 @@ impl Tool for FileSystemTool {
                 let path = args["path"].as_str()
                     .ok_or_else(|| anyhow!("Missing 'path' parameter"))?;
                 
+                if !self.ask_confirmation("CREATE directory", path) {
+                     return Ok(ToolResult {
+                        success: false,
+                        result: "Operation cancelled by user.".to_string(),
+                        metadata: None,
+                    });
+                }
+
                 let full_path = self.get_full_path(path)?;
                 
                 match fs::create_dir_all(&full_path) {

@@ -14,7 +14,7 @@ pub struct AIAgent {
     cloud_providers: Vec<Arc<dyn ModelProvider>>,
     config: Config,
     tool_manager: ToolManager,
-    memory_manager: MemoryManager,
+    memory_manager: Arc<MemoryManager>,
     query_processor: QueryProcessor,
     prompt_cache: Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>,
 }
@@ -35,13 +35,15 @@ impl AIAgent {
     pub async fn new(config: Config) -> Result<Self> {
         info!("Initializing AI Agent...");
 
-        // Get app data directory for database
-        let app_data = std::env::var("APPDATA")
-            .or_else(|_| std::env::var("LOCALAPPDATA"))
-            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
+        // Get app data directory for database - Cross-platform
+        let app_data = dirs::data_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| std::env::var("APPDATA").ok())
+            .or_else(|| std::env::var("LOCALAPPDATA").ok())
+            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
 
-        // Initialize memory manager
-        let memory_manager = MemoryManager::new(&app_data)?;
+        // Initialize memory manager (async)
+        let memory_manager = Arc::new(MemoryManager::new(&app_data).await?);
 
         // Initialize local provider
         let local_provider = match LocalProvider::new(config.local_model.clone()) {
@@ -127,7 +129,7 @@ impl AIAgent {
             local_provider,
             cloud_providers,
             config,
-            tool_manager: ToolManager::new(),
+            tool_manager: ToolManager::new().await,
             memory_manager,
             query_processor: QueryProcessor::new(),
             prompt_cache: Arc::new(Mutex::new(std::collections::HashMap::new())),
@@ -184,76 +186,76 @@ impl AIAgent {
     }
 
     // Memory management delegation
-    pub fn store_conversations_batch(&self, conversations: Vec<(String, String, Option<String>, Option<String>)>) -> Result<()> {
-        self.memory_manager.store_conversations_batch(conversations)
+    pub async fn store_conversations_batch(&self, conversations: Vec<(String, String, Option<String>, Option<String>)>) -> Result<()> {
+        self.memory_manager.store_conversations_batch(conversations).await
     }
 
-    pub fn store_ram_memory(&self, key: &str, value: &str) -> Result<()> {
-        self.memory_manager.store_ram_memory(key, value)
+    pub async fn store_ram_memory(&self, key: &str, value: &str) -> Result<()> {
+        self.memory_manager.store_ram_memory(key, value).await
     }
 
-    pub fn get_ram_memory(&self, key: &str) -> Result<Option<String>> {
-        self.memory_manager.get_ram_memory(key)
+    pub async fn get_ram_memory(&self, key: &str) -> Result<Option<String>> {
+        self.memory_manager.get_ram_memory(key).await
     }
 
-    pub fn store_persistent_memory(&self, key: &str, value: &str) -> Result<()> {
-        self.memory_manager.store_persistent_memory(key, value)
+    pub async fn store_persistent_memory(&self, key: &str, value: &str) -> Result<()> {
+        self.memory_manager.store_persistent_memory(key, value).await
     }
 
-    pub fn get_persistent_memory(&self, key: &str) -> Result<Option<String>> {
-        self.memory_manager.get_persistent_memory(key)
+    pub async fn get_persistent_memory(&self, key: &str) -> Result<Option<String>> {
+        self.memory_manager.get_persistent_memory(key).await
     }
 
-    pub fn store_user_preference(&self, key: &str, value: &str) -> Result<()> {
-        self.memory_manager.store_user_preference(key, value)
+    pub async fn store_user_preference(&self, key: &str, value: &str) -> Result<()> {
+        self.memory_manager.store_user_preference(key, value).await
     }
 
-    pub fn get_user_preference(&self, key: &str) -> Result<Option<String>> {
-        self.memory_manager.get_user_preference(key)
+    pub async fn get_user_preference(&self, key: &str) -> Result<Option<String>> {
+        self.memory_manager.get_user_preference(key).await
     }
 
-    pub fn get_air_info(&self, key: &str) -> Result<Option<String>> {
-        self.memory_manager.get_air_info(key)
+    pub async fn get_air_info(&self, key: &str) -> Result<Option<String>> {
+        self.memory_manager.get_air_info(key).await
     }
 
-    pub fn get_recent_conversations(&self, limit: usize) -> Result<Vec<(String, String, String)>> {
-        self.memory_manager.get_recent_conversations(limit)
+    pub async fn get_recent_conversations(&self, limit: usize) -> Result<Vec<(String, String, String)>> {
+        self.memory_manager.get_recent_conversations(limit).await
     }
 
-    pub fn perform_maintenance(&self) -> Result<()> {
-        self.memory_manager.perform_maintenance()
+    pub async fn perform_maintenance(&self) -> Result<()> {
+        self.memory_manager.perform_maintenance().await
     }
 
-    pub fn store_mistake(&self, session_id: &str, user_input: &str, ai_response: Option<&str>,
+    pub async fn store_mistake(&self, session_id: &str, user_input: &str, ai_response: Option<&str>,
                         error_type: &str, error_message: &str, context: Option<&str>) -> Result<i64> {
-        self.memory_manager.store_mistake(session_id, user_input, ai_response, error_type, error_message, context)
+        self.memory_manager.store_mistake(session_id, user_input, ai_response, error_type, error_message, context).await
     }
 
-    pub fn mark_mistake_learned(&self, mistake_id: i64) -> Result<()> {
-        self.memory_manager.mark_mistake_learned(mistake_id)
+    pub async fn mark_mistake_learned(&self, mistake_id: i64) -> Result<()> {
+        self.memory_manager.mark_mistake_learned(mistake_id).await
     }
 
-    pub fn get_unlearned_mistakes(&self, error_type: Option<&str>, limit: usize) -> Result<Vec<(i64, String, String, String, String)>> {
-        self.memory_manager.get_unlearned_mistakes(error_type, limit)
+    pub async fn get_unlearned_mistakes(&self, error_type: Option<&str>, limit: usize) -> Result<Vec<(i64, String, String, String, String)>> {
+        self.memory_manager.get_unlearned_mistakes(error_type, limit).await
     }
 
-    pub fn update_learning_pattern(&self, pattern: &str, was_success: bool) -> Result<()> {
-        self.memory_manager.update_learning_pattern(pattern, was_success)
+    pub async fn update_learning_pattern(&self, pattern: &str, was_success: bool) -> Result<()> {
+        self.memory_manager.update_learning_pattern(pattern, was_success).await
     }
 
-    pub fn get_learning_insights(&self, pattern: &str) -> Result<Option<(i32, i32, f64)>> {
-        self.memory_manager.get_learning_insights(pattern)
+    pub async fn get_learning_insights(&self, pattern: &str) -> Result<Option<(i32, i32, f64)>> {
+        self.memory_manager.get_learning_insights(pattern).await
     }
 
-    pub fn get_mistake_insights(&self, prompt: &str) -> Result<Vec<String>> {
-        self.memory_manager.get_mistake_insights(prompt)
+    pub async fn get_mistake_insights(&self, prompt: &str) -> Result<Vec<String>> {
+        self.memory_manager.get_mistake_insights(prompt).await
     }
 
-    pub fn record_query_error(&self, session_id: &str, user_input: &str, error: &anyhow::Error, context: Option<&str>) -> Result<()> {
-        self.memory_manager.record_query_error(session_id, user_input, error, context)
+    pub async fn record_query_error(&self, session_id: &str, user_input: &str, error: &anyhow::Error, context: Option<&str>) -> Result<()> {
+        self.memory_manager.record_query_error(session_id, user_input, error, context).await
     }
 
-    pub fn build_enhanced_prompt(&self, base_prompt: &str) -> Result<String> {
-        self.memory_manager.build_enhanced_prompt(base_prompt, &self.prompt_cache)
+    pub async fn build_enhanced_prompt(&self, base_prompt: &str) -> Result<String> {
+        self.memory_manager.build_enhanced_prompt(base_prompt, &self.prompt_cache).await
     }
 }

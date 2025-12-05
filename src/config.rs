@@ -50,10 +50,13 @@ pub struct PerformanceConfig {
 
 impl Config {
     pub fn load() -> Result<Self> {
-        // Get app data directory
-        let app_data = std::env::var("APPDATA")
-            .or_else(|_| std::env::var("LOCALAPPDATA"))
-            .map_err(|_| anyhow::anyhow!("Could not find APPDATA or LOCALAPPDATA"))?;
+        // Get app data directory - Cross-platform
+        let app_data = dirs::data_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .or_else(|| std::env::var("APPDATA").ok())
+            .or_else(|| std::env::var("LOCALAPPDATA").ok())
+            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+
         let config_dir = PathBuf::from(app_data).join("air");
         std::fs::create_dir_all(&config_dir)?;
         let config_path = config_dir.join("config.toml");

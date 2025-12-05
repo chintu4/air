@@ -15,7 +15,7 @@ pub struct CacheFallback;
 impl FallbackStrategy for CacheFallback {
     async fn execute(&self, prompt: &str, memory_manager: &MemoryManager) -> Result<ModelResponse> {
         // Try to find similar past responses
-        if let Ok(recent_convs) = memory_manager.get_recent_conversations(10) {
+        if let Ok(recent_convs) = memory_manager.get_recent_conversations(10).await {
             for (user_input, ai_response, _) in recent_convs {
                 if Self::is_similar_query(prompt, &user_input) {
                     tracing::info!("📋 Found similar past response, using as fallback");

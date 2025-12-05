@@ -17,7 +17,7 @@ pub struct ToolManager {
 }
 
 impl ToolManager {
-    pub fn new() -> Self {
+    pub async fn new() -> Self {
         Self {
             filesystem: Arc::new(FileSystemTool::new(None)),
             calculator: Arc::new(CalculatorTool::new()),
@@ -27,7 +27,16 @@ impl ToolManager {
             command: Arc::new(CommandTool::new()),
             screenshot: Arc::new(ScreenshotTool::new(None)),
             voice: Arc::new(VoiceTool::new(None)),
-            knowledge: Arc::new(KnowledgeTool::new().expect("Failed to init knowledge tool")),
+            knowledge: Arc::new(KnowledgeTool::new().await.unwrap_or_else(|_| {
+                // This branch should technically be unreachable now since new() handles errors internally,
+                // but just in case we return a dummy struct or panic safely?
+                // Actually KnowledgeTool::new() returns Result<Self>, so we can unwrap safely if we know it returns Ok.
+                // But wait, I changed it to return Ok even on error (just with None store).
+                // So unwrap() is fine.
+                // However, the signature is Result<Self, anyhow::Error>.
+                // I'll stick to unwrap() but I'll ensure KnowledgeTool::new() catches everything.
+                panic!("KnowledgeTool::new() should not fail")
+            })),
         }
     }
     
