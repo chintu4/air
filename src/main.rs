@@ -238,6 +238,28 @@ async fn handle_local_setup() -> Result<()> {
         }
     }
 
+    // Download tokenizer.json
+    let tokenizer_filename = "tokenizer.json";
+    let tokenizer_path = models_dir.join(tokenizer_filename);
+
+    if tokenizer_path.exists() {
+        println!("✅ Tokenizer already exists at: {:?}", tokenizer_path);
+    } else {
+        println!("⚠️  Tokenizer not found.");
+        println!("Downloading tokenizer...");
+
+        let url = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json";
+        let response = reqwest::get(url).await?;
+
+        if response.status().is_success() {
+            let content = response.bytes().await?;
+            std::fs::write(&tokenizer_path, content)?;
+            println!("✅ Successfully downloaded tokenizer to: {:?}", tokenizer_path);
+        } else {
+            println!("❌ Failed to download tokenizer: {}", response.status());
+        }
+    }
+
     // Update configuration to point to the model
     println!("\n📝 Updating configuration...");
 
