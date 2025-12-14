@@ -74,8 +74,33 @@ impl EmbeddingModel {
         let embeddings = embeddings.squeeze(0)?;
 
         // Normalize
-        let embeddings = (embeddings.clone() / embeddings.sqr()?.sum_all()?.sqrt()?)?;
+        let norm = embeddings.sqr()?.sum_all()?.sqrt()?;
+        let embeddings = embeddings.broadcast_div(&norm)?;
 
         Ok(embeddings.to_vec1()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candle_core::Tensor;
+
+    #[test]
+    fn test_normalization_shape_handling() -> Result<()> {
+        let device = Device::Cpu;
+        // Simulate a 384-dim embedding vector
+        let data = vec![1.0f32; 384];
+        let embeddings = Tensor::new(data, &device)?;
+
+        // Calculate norm (scalar)
+        let norm = embeddings.sqr()?.sum_all()?.sqrt()?;
+        assert_eq!(norm.rank(), 0);
+
+        // This should not panic
+        let normalized = embeddings.broadcast_div(&norm)?;
+        assert_eq!(normalized.shape().dims(), &[384]);
+
+        Ok(())
     }
 }
