@@ -46,21 +46,30 @@ impl AIAgent {
         let memory_manager = Arc::new(MemoryManager::new(&app_data).await?);
 
         // Initialize local provider
-        let local_provider = match LocalProvider::new(config.local_model.clone()) {
-            Ok(provider) => {
-                info!("✅ Local model initialized: {:?}", config.local_model.model_path);
-                Some(Arc::new(provider) as Arc<dyn ModelProvider>)
+        let local_provider = if config.local_model.enabled {
+            match LocalProvider::new(config.local_model.clone()) {
+                Ok(provider) => {
+                    info!("✅ Local model initialized: {:?}", config.local_model.model_path);
+                    Some(Arc::new(provider) as Arc<dyn ModelProvider>)
+                }
+                Err(e) => {
+                    warn!("❌ Failed to initialize local model: {}", e);
+                    None
+                }
             }
-            Err(e) => {
-                warn!("❌ Failed to initialize local model: {}", e);
-                None
-            }
+        } else {
+            info!("🚫 Local model disabled by config");
+            None
         };
 
         // Initialize cloud providers
         let mut cloud_providers: Vec<Arc<dyn ModelProvider>> = Vec::new();
 
         for cloud_config in &config.cloud_providers {
+            if !cloud_config.enabled {
+                info!("🚫 Cloud provider disabled by config: {}", cloud_config.name);
+                continue;
+            }
             match cloud_config.name.as_str() {
                 "openai" => {
                     match OpenAIProvider::new(cloud_config.clone()) {

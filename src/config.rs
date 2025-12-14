@@ -16,6 +16,8 @@ pub struct LocalModelConfig {
     pub temperature: f32,
     pub context_length: u32,
     pub threads: u32,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 impl Default for LocalModelConfig {
@@ -26,6 +28,7 @@ impl Default for LocalModelConfig {
             temperature: 0.7,
             context_length: 2048,
             threads: 0,
+            enabled: true,
         }
     }
 }
@@ -39,6 +42,12 @@ pub struct CloudProviderConfig {
     pub max_tokens: u32,
     pub temperature: f32,
     pub timeout_seconds: u64,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +138,7 @@ impl Default for Config {
                     max_tokens: 1000,
                     temperature: 0.7,
                     timeout_seconds: 30,
+                    enabled: true,
                 },
                 // CloudProviderConfig {
                 //     name: "openrouter".to_string(),
