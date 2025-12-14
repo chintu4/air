@@ -1,9 +1,11 @@
-use anyhow::Result;
-use rusqlite::Connection;
+use anyhow::{Result, anyhow};
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool, Row};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tracing::info;
+use tracing::{info, warn};
 use md5;
+use crate::rag::store::KnowledgeStore;
+use crate::rag::langchain_embedding::CandleEmbedder;
 
 #[derive(Debug, Clone)]
 pub struct Conversation {
@@ -37,22 +39,36 @@ pub struct LearningPattern {
 }
 
 pub struct MemoryManager {
-    ram_memory: Arc<Mutex<Connection>>,  // Session memory - clears each session
-    rom_memory: Arc<Mutex<Connection>>,  // Persistent memory - survives sessions
-    about_memory: Arc<Mutex<Connection>>, // Static info about air
+    ram_pool: SqlitePool,
+    rom_pool: SqlitePool,
+    about_pool: SqlitePool,
+    knowledge_store: Option<KnowledgeStore<CandleEmbedder>>,
 }
 
 impl MemoryManager {
-    pub fn new(app_data: &str) -> Result<Self> {
-        let ram_db = std::path::Path::new(app_data).join("air").join("ram_memory.db");
-        let rom_db = std::path::Path::new(app_data).join("air").join("rom_memory.db");
-        let about_db = std::path::Path::new(app_data).join("air").join("about_memory.db");
+    pub async fn new(app_data: &str) -> Result<Self> {
+        let ram_db_path = std::path::Path::new(app_data).join("air").join("ram_memory.db");
+        let rom_db_path = std::path::Path::new(app_data).join("air").join("rom_memory.db");
+        let about_db_path = std::path::Path::new(app_data).join("air").join("about_memory.db");
 
-        // Initialize RAM memory (session-based, recreate tables each time)
-        let ram_conn = Connection::open(&ram_db)?;
-        ram_conn.execute("DROP TABLE IF EXISTS conversations", [])?;
-        ram_conn.execute("DROP TABLE IF EXISTS memory", [])?;
-        ram_conn.execute(
+        // Ensure directory exists
+        if let Some(parent) = ram_db_path.parent() {
+            if !parent.exists() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+        }
+
+        // Initialize RAM memory (clear it)
+        if ram_db_path.exists() {
+             tokio::fs::remove_file(&ram_db_path).await.ok();
+        }
+        tokio::fs::File::create(&ram_db_path).await?;
+
+        let ram_pool = SqlitePoolOptions::new()
+            .connect(&format!("sqlite://{}", ram_db_path.to_string_lossy()))
+            .await?;
+
+        sqlx::query(
             "CREATE TABLE conversations (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_input TEXT NOT NULL,
@@ -60,37 +76,42 @@ impl MemoryManager {
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 context TEXT,
                 tools_used TEXT
-            )",
-            [],
-        )?;
-        ram_conn.execute(
+            )"
+        ).execute(&ram_pool).await?;
+
+        sqlx::query(
             "CREATE TABLE memory (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
+            )"
+        ).execute(&ram_pool).await?;
 
-        // Initialize ROM memory (persistent)
-        let rom_conn = Connection::open(&rom_db)?;
-        rom_conn.execute(
+        // Initialize ROM memory
+        if !rom_db_path.exists() {
+            tokio::fs::File::create(&rom_db_path).await?;
+        }
+        let rom_pool = SqlitePoolOptions::new()
+            .connect(&format!("sqlite://{}", rom_db_path.to_string_lossy()))
+            .await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS persistent_memory (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
-        rom_conn.execute(
+            )"
+        ).execute(&rom_pool).await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS user_preferences (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
-        rom_conn.execute(
+            )"
+        ).execute(&rom_pool).await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS mistakes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT,
@@ -101,65 +122,74 @@ impl MemoryManager {
                 context TEXT,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 learned BOOLEAN DEFAULT FALSE
-            )",
-            [],
-        )?;
-        rom_conn.execute(
+            )"
+        ).execute(&rom_pool).await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS learning_patterns (
                 pattern TEXT PRIMARY KEY,
                 mistake_count INTEGER DEFAULT 0,
                 success_count INTEGER DEFAULT 0,
                 last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
+            )"
+        ).execute(&rom_pool).await?;
 
-        // Initialize ABOUT memory (static info)
-        let about_conn = Connection::open(&about_db)?;
-        about_conn.execute(
+        // Initialize ABOUT memory
+        if !about_db_path.exists() {
+             tokio::fs::File::create(&about_db_path).await?;
+        }
+        let about_pool = SqlitePoolOptions::new()
+            .connect(&format!("sqlite://{}", about_db_path.to_string_lossy()))
+            .await?;
+
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS air_info (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
-            )",
-            [],
-        )?;
+            )"
+        ).execute(&about_pool).await?;
 
-        // Insert default air information if not exists
-        about_conn.execute(
-            "INSERT OR IGNORE INTO air_info (key, value) VALUES (?, ?)",
-            ["creator", "Chintu (dsjapnc)"],
-        )?;
-        about_conn.execute(
-            "INSERT OR IGNORE INTO air_info (key, value) VALUES (?, ?)",
-            ["version", "0.1.0"],
-        )?;
-        about_conn.execute(
-            "INSERT OR IGNORE INTO air_info (key, value) VALUES (?, ?)",
-            ["description", "I am air, an AI Agent with local and cloud model fallback"],
-        )?;
-        about_conn.execute(
-            "INSERT OR IGNORE INTO air_info (key, value) VALUES (?, ?)",
-            ["repository", "https://github.com/chintu4/air"],
-        )?;
+        // Defaults
+        let defaults = vec![
+            ("creator", "Chintu (dsjapnc)"),
+            ("version", "0.1.0"),
+            ("description", "I am air, an AI Agent with local and cloud model fallback"),
+            ("repository", "https://github.com/chintu4/air"),
+        ];
+
+        for (key, value) in defaults {
+            sqlx::query("INSERT OR IGNORE INTO air_info (key, value) VALUES (?, ?)")
+                .bind(key)
+                .bind(value)
+                .execute(&about_pool)
+                .await?;
+        }
+
+        // Initialize Knowledge Store with CandleEmbedder
+        let knowledge_store = match KnowledgeStore::new(app_data).await {
+            Ok(store) => Some(store),
+            Err(e) => {
+                warn!("⚠️ Failed to initialize Memory Knowledge Store: {}. Context recall disabled.", e);
+                None
+            }
+        };
 
         Ok(Self {
-            ram_memory: Arc::new(Mutex::new(ram_conn)),
-            rom_memory: Arc::new(Mutex::new(rom_conn)),
-            about_memory: Arc::new(Mutex::new(about_conn)),
+            ram_pool,
+            rom_pool,
+            about_pool,
+            knowledge_store,
         })
     }
 
-    /// Store multiple conversations in batch for better performance
-    pub fn store_conversations_batch(&self, conversations: Vec<(String, String, Option<String>, Option<String>)>) -> Result<()> {
+    pub async fn store_conversations_batch(&self, conversations: Vec<(String, String, Option<String>, Option<String>)>) -> Result<()> {
         if conversations.is_empty() {
             return Ok(());
         }
 
-        let conn = self.ram_memory.lock().unwrap();
-        let tx = conn.unchecked_transaction()?;
+        let mut tx = self.ram_pool.begin().await?;
 
         for (user_input, ai_response, context, tools_used) in conversations {
-            // Compress long conversations
             let compressed_input = if user_input.len() > 500 {
                 format!("{}... (truncated)", &user_input[..200])
             } else {
@@ -172,184 +202,173 @@ impl MemoryManager {
                 ai_response
             };
 
-            tx.execute(
-                "INSERT INTO conversations (user_input, ai_response, context, tools_used) VALUES (?, ?, ?, ?)",
-                [&compressed_input, &compressed_response, &context.unwrap_or_default(), &tools_used.unwrap_or_default()],
-            )?;
+            sqlx::query("INSERT INTO conversations (user_input, ai_response, context, tools_used) VALUES (?, ?, ?, ?)")
+                .bind(compressed_input)
+                .bind(compressed_response)
+                .bind(context.unwrap_or_default())
+                .bind(tools_used.unwrap_or_default())
+                .execute(&mut *tx)
+                .await?;
         }
 
-        tx.commit()?;
+        tx.commit().await?;
         Ok(())
     }
 
-    /// Store key-value pair in RAM memory
-    pub fn store_ram_memory(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.ram_memory.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO memory (key, value) VALUES (?, ?)",
-            [key, value],
-        )?;
+    pub async fn store_ram_memory(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO memory (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&self.ram_pool)
+            .await?;
         Ok(())
     }
 
-    /// Retrieve value from RAM memory
-    pub fn get_ram_memory(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.ram_memory.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT value FROM memory WHERE key = ?")?;
-        let mut rows = stmt.query([key])?;
+    pub async fn get_ram_memory(&self, key: &str) -> Result<Option<String>> {
+        let result = sqlx::query("SELECT value FROM memory WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.ram_pool)
+            .await?;
 
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get(0)?))
+        if let Some(row) = result {
+            Ok(Some(row.get(0)))
         } else {
             Ok(None)
         }
     }
 
-    /// Store persistent memory in ROM
-    pub fn store_persistent_memory(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.rom_memory.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO persistent_memory (key, value) VALUES (?, ?)",
-            [key, value],
-        )?;
+    pub async fn store_persistent_memory(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO persistent_memory (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&self.rom_pool)
+            .await?;
         Ok(())
     }
 
-    /// Retrieve from persistent memory
-    pub fn get_persistent_memory(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.rom_memory.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT value FROM persistent_memory WHERE key = ?")?;
-        let mut rows = stmt.query([key])?;
+    pub async fn get_persistent_memory(&self, key: &str) -> Result<Option<String>> {
+        let result = sqlx::query("SELECT value FROM persistent_memory WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.rom_pool)
+            .await?;
 
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get(0)?))
+        if let Some(row) = result {
+            Ok(Some(row.get(0)))
         } else {
             Ok(None)
         }
     }
 
-    /// Store user preference
-    pub fn store_user_preference(&self, key: &str, value: &str) -> Result<()> {
-        let conn = self.rom_memory.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
-            [key, value],
-        )?;
+    pub async fn store_user_preference(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&self.rom_pool)
+            .await?;
         Ok(())
     }
 
-    /// Get user preference
-    pub fn get_user_preference(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.rom_memory.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT value FROM user_preferences WHERE key = ?")?;
-        let mut rows = stmt.query([key])?;
+    pub async fn get_user_preference(&self, key: &str) -> Result<Option<String>> {
+        let result = sqlx::query("SELECT value FROM user_preferences WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.rom_pool)
+            .await?;
 
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get(0)?))
+        if let Some(row) = result {
+            Ok(Some(row.get(0)))
         } else {
             Ok(None)
         }
     }
 
-    /// Get air information
-    pub fn get_air_info(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.about_memory.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT value FROM air_info WHERE key = ?")?;
-        let mut rows = stmt.query([key])?;
+    pub async fn get_air_info(&self, key: &str) -> Result<Option<String>> {
+        let result = sqlx::query("SELECT value FROM air_info WHERE key = ?")
+            .bind(key)
+            .fetch_optional(&self.about_pool)
+            .await?;
 
-        if let Some(row) = rows.next()? {
-            Ok(Some(row.get(0)?))
+        if let Some(row) = result {
+            Ok(Some(row.get(0)))
         } else {
             Ok(None)
         }
     }
 
-    /// Get recent conversations from RAM with automatic cleanup
-    pub fn get_recent_conversations(&self, limit: usize) -> Result<Vec<(String, String, String)>> {
-        let conn = self.ram_memory.lock().unwrap();
+    pub async fn get_recent_conversations(&self, limit: usize) -> Result<Vec<(String, String, String)>> {
+        // Cleanup if needed
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM conversations")
+            .fetch_one(&self.ram_pool)
+            .await?
+            .get(0);
 
-        // First, check total conversation count and cleanup if needed
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM conversations", [], |row| row.get(0))?;
-        if count > 1000 { // Limit to 1000 conversations max
+        if count > 1000 {
             info!("🧹 Cleaning up old conversations ({} > 1000)", count);
-            conn.execute("DELETE FROM conversations WHERE id IN (SELECT id FROM conversations ORDER BY timestamp DESC LIMIT -1 OFFSET 500)", [])?;
+            sqlx::query("DELETE FROM conversations WHERE id IN (SELECT id FROM conversations ORDER BY timestamp DESC LIMIT -1 OFFSET 500)")
+                .execute(&self.ram_pool)
+                .await?;
         }
 
-        let mut stmt = conn.prepare(
-            "SELECT user_input, ai_response, timestamp FROM conversations ORDER BY timestamp DESC LIMIT ?"
-        )?;
-        let mut rows = stmt.query([limit])?;
+        let rows = sqlx::query("SELECT user_input, ai_response, timestamp FROM conversations ORDER BY timestamp DESC LIMIT ?")
+            .bind(limit as i64)
+            .fetch_all(&self.ram_pool)
+            .await?;
 
         let mut conversations = Vec::new();
-        while let Some(row) = rows.next()? {
+        for row in rows {
             conversations.push((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
+                row.get(0),
+                row.get(1),
+                row.get(2),
             ));
         }
-        conversations.reverse(); // Return in chronological order
+        conversations.reverse();
         Ok(conversations)
     }
 
-    /// Periodic maintenance task for database optimization
-    pub fn perform_maintenance(&self) -> Result<()> {
+    pub async fn perform_maintenance(&self) -> Result<()> {
         info!("🔧 Performing database maintenance...");
 
-        // RAM memory maintenance
-        {
-            let conn = self.ram_memory.lock().unwrap();
-            // Vacuum to reclaim space
-            conn.execute("VACUUM", [])?;
-            // Remove very old entries (keep last 24 hours)
-            conn.execute("DELETE FROM conversations WHERE timestamp < datetime('now', '-1 day')", [])?;
-            conn.execute("DELETE FROM memory WHERE timestamp < datetime('now', '-1 day')", [])?;
-        }
+        sqlx::query("VACUUM").execute(&self.ram_pool).await?;
+        sqlx::query("DELETE FROM conversations WHERE timestamp < datetime('now', '-1 day')").execute(&self.ram_pool).await?;
+        sqlx::query("DELETE FROM memory WHERE timestamp < datetime('now', '-1 day')").execute(&self.ram_pool).await?;
 
-        // ROM memory maintenance
-        {
-            let conn = self.rom_memory.lock().unwrap();
-            conn.execute("VACUUM", [])?;
-            // Remove very old mistakes (keep last 30 days)
-            conn.execute("DELETE FROM mistakes WHERE timestamp < datetime('now', '-30 days')", [])?;
-        }
+        sqlx::query("VACUUM").execute(&self.rom_pool).await?;
+        sqlx::query("DELETE FROM mistakes WHERE timestamp < datetime('now', '-30 days')").execute(&self.rom_pool).await?;
 
-        // ABOUT memory maintenance
-        {
-            let conn = self.about_memory.lock().unwrap();
-            conn.execute("VACUUM", [])?;
-        }
+        sqlx::query("VACUUM").execute(&self.about_pool).await?;
 
         info!("✅ Database maintenance completed");
         Ok(())
     }
 
-    /// Store a mistake in ROM memory for learning
-    pub fn store_mistake(&self, session_id: &str, user_input: &str, ai_response: Option<&str>,
+    pub async fn store_mistake(&self, session_id: &str, user_input: &str, ai_response: Option<&str>,
                         error_type: &str, error_message: &str, context: Option<&str>) -> Result<i64> {
-        let conn = self.rom_memory.lock().unwrap();
-        conn.execute(
+        let result = sqlx::query(
             "INSERT INTO mistakes (session_id, user_input, ai_response, error_type, error_message, context)
-             VALUES (?, ?, ?, ?, ?, ?)",
-            [session_id, user_input, &ai_response.unwrap_or(""), error_type, error_message, &context.unwrap_or("")],
-        )?;
-        Ok(conn.last_insert_rowid())
+             VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        .bind(session_id)
+        .bind(user_input)
+        .bind(ai_response.unwrap_or(""))
+        .bind(error_type)
+        .bind(error_message)
+        .bind(context.unwrap_or(""))
+        .execute(&self.rom_pool)
+        .await?;
+
+        Ok(result.last_insert_rowid())
     }
 
-    /// Mark a mistake as learned
-    pub fn mark_mistake_learned(&self, mistake_id: i64) -> Result<()> {
-        let conn = self.rom_memory.lock().unwrap();
-        conn.execute(
-            "UPDATE mistakes SET learned = TRUE WHERE id = ?",
-            [mistake_id],
-        )?;
+    pub async fn mark_mistake_learned(&self, mistake_id: i64) -> Result<()> {
+        sqlx::query("UPDATE mistakes SET learned = TRUE WHERE id = ?")
+            .bind(mistake_id)
+            .execute(&self.rom_pool)
+            .await?;
         Ok(())
     }
 
-    /// Get unlearned mistakes for a specific error type
-    pub fn get_unlearned_mistakes(&self, error_type: Option<&str>, limit: usize) -> Result<Vec<(i64, String, String, String, String)>> {
-        let conn = self.rom_memory.lock().unwrap();
-        let query = if let Some(_err_type) = error_type {
+    pub async fn get_unlearned_mistakes(&self, error_type: Option<&str>, limit: usize) -> Result<Vec<(i64, String, String, String, String)>> {
+        let query_str = if error_type.is_some() {
             "SELECT id, user_input, error_type, error_message, context FROM mistakes
              WHERE learned = FALSE AND error_type = ? ORDER BY timestamp DESC LIMIT ?"
         } else {
@@ -357,65 +376,64 @@ impl MemoryManager {
              WHERE learned = FALSE ORDER BY timestamp DESC LIMIT ?"
         };
 
-        let mut stmt = conn.prepare(query)?;
-        let mut rows = if let Some(err_type) = error_type {
-            stmt.query([err_type, &limit.to_string()])?
+        let rows = if let Some(err_type) = error_type {
+            sqlx::query(query_str)
+                .bind(err_type)
+                .bind(limit as i64)
+                .fetch_all(&self.rom_pool)
+                .await?
         } else {
-            stmt.query([limit])?
+            sqlx::query(query_str)
+                .bind(limit as i64)
+                .fetch_all(&self.rom_pool)
+                .await?
         };
 
         let mut mistakes = Vec::new();
-        while let Some(row) = rows.next()? {
+        for row in rows {
             mistakes.push((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
+                row.get(0),
+                row.get(1),
+                row.get(2),
+                row.get(3),
+                row.get(4),
             ));
         }
         Ok(mistakes)
     }
 
-    /// Store learning pattern (success/failure tracking)
-    pub fn update_learning_pattern(&self, pattern: &str, was_success: bool) -> Result<()> {
-        let conn = self.rom_memory.lock().unwrap();
-
+    pub async fn update_learning_pattern(&self, pattern: &str, was_success: bool) -> Result<()> {
         if was_success {
-            conn.execute(
-                "INSERT OR IGNORE INTO learning_patterns (pattern, success_count) VALUES (?, 1)",
-                [pattern],
-            )?;
-            conn.execute(
+             sqlx::query("INSERT OR IGNORE INTO learning_patterns (pattern, success_count) VALUES (?, 1)")
+                .bind(pattern)
+                .execute(&self.rom_pool)
+                .await?;
+             sqlx::query(
                 "UPDATE learning_patterns SET success_count = success_count + 1, last_updated = CURRENT_TIMESTAMP
-                 WHERE pattern = ?",
-                [pattern],
-            )?;
+                 WHERE pattern = ?"
+             ).bind(pattern).execute(&self.rom_pool).await?;
         } else {
-            conn.execute(
-                "INSERT OR IGNORE INTO learning_patterns (pattern, mistake_count) VALUES (?, 1)",
-                [pattern],
-            )?;
-            conn.execute(
+            sqlx::query("INSERT OR IGNORE INTO learning_patterns (pattern, mistake_count) VALUES (?, 1)")
+                .bind(pattern)
+                .execute(&self.rom_pool)
+                .await?;
+            sqlx::query(
                 "UPDATE learning_patterns SET mistake_count = mistake_count + 1, last_updated = CURRENT_TIMESTAMP
-                 WHERE pattern = ?",
-                [pattern],
-            )?;
+                 WHERE pattern = ?"
+            ).bind(pattern).execute(&self.rom_pool).await?;
         }
         Ok(())
     }
 
-    /// Get learning insights for a pattern
-    pub fn get_learning_insights(&self, pattern: &str) -> Result<Option<(i32, i32, f64)>> {
-        let conn = self.rom_memory.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT mistake_count, success_count FROM learning_patterns WHERE pattern = ?"
-        )?;
-        let mut rows = stmt.query([pattern])?;
+    pub async fn get_learning_insights(&self, pattern: &str) -> Result<Option<(i32, i32, f64)>> {
+        let result = sqlx::query("SELECT mistake_count, success_count FROM learning_patterns WHERE pattern = ?")
+            .bind(pattern)
+            .fetch_optional(&self.rom_pool)
+            .await?;
 
-        if let Some(row) = rows.next()? {
-            let mistake_count: i32 = row.get(0)?;
-            let success_count: i32 = row.get(1)?;
+        if let Some(row) = result {
+            let mistake_count: i32 = row.get(0);
+            let success_count: i32 = row.get(1);
             let total = mistake_count + success_count;
             let success_rate = if total > 0 { success_count as f64 / total as f64 } else { 0.0 };
             Ok(Some((mistake_count, success_count, success_rate)))
@@ -424,25 +442,21 @@ impl MemoryManager {
         }
     }
 
-    /// Get mistake insights with fuzzy matching for better similarity detection
-    pub fn get_mistake_insights(&self, prompt: &str) -> Result<Vec<String>> {
-        let conn = self.rom_memory.lock().unwrap();
-        let mut stmt = conn.prepare(
+    pub async fn get_mistake_insights(&self, prompt: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
             "SELECT user_input, error_message, context FROM mistakes
              WHERE learned = FALSE ORDER BY timestamp DESC LIMIT 10"
-        )?;
+        ).fetch_all(&self.rom_pool).await?;
 
-        let mut rows = stmt.query([])?;
         let mut insights = Vec::new();
 
-        while let Some(row) = rows.next()? {
-            let user_input: String = row.get(0)?;
-            let error_message: String = row.get(1)?;
-            let context: Option<String> = row.get(2)?;
+        for row in rows {
+            let user_input: String = row.get(0);
+            let error_message: String = row.get(1);
+            let context: Option<String> = row.get(2);
 
-            // Use fuzzy matching for better similarity detection
             if self.fuzzy_match(prompt, &user_input) > 0.3 {
-                let insight = if let Some(ctx) = context {
+                 let insight = if let Some(ctx) = context {
                     format!("Similar query '{}' failed with: {} (Context: {})",
                            user_input, error_message, ctx)
                 } else {
@@ -451,38 +465,27 @@ impl MemoryManager {
                 insights.push(insight);
             }
         }
-
         Ok(insights)
     }
 
-    /// Fuzzy string matching using Levenshtein distance approximation
     fn fuzzy_match(&self, s1: &str, s2: &str) -> f64 {
-        if s1.is_empty() && s2.is_empty() {
-            return 1.0;
-        }
-        if s1.is_empty() || s2.is_empty() {
-            return 0.0;
-        }
+        if s1.is_empty() && s2.is_empty() { return 1.0; }
+        if s1.is_empty() || s2.is_empty() { return 0.0; }
 
         let s1_lower = s1.to_lowercase();
         let s2_lower = s2.to_lowercase();
 
-        // Simple word-based similarity
         let s1_words: std::collections::HashSet<&str> = s1_lower.split_whitespace().collect();
         let s2_words: std::collections::HashSet<&str> = s2_lower.split_whitespace().collect();
 
         let intersection = s1_words.intersection(&s2_words).count();
         let union = s1_words.union(&s2_words).count();
 
-        if union == 0 {
-            return 0.0;
-        }
-
+        if union == 0 { return 0.0; }
         intersection as f64 / union as f64
     }
 
-    /// Helper method to store errors that occur during query processing
-    pub fn record_query_error(&self, session_id: &str, user_input: &str, error: &anyhow::Error, context: Option<&str>) -> Result<()> {
+    pub async fn record_query_error(&self, session_id: &str, user_input: &str, error: &anyhow::Error, context: Option<&str>) -> Result<()> {
         let error_type = if error.to_string().contains("timeout") {
             "timeout"
         } else if error.to_string().contains("API") {
@@ -496,80 +499,81 @@ impl MemoryManager {
         self.store_mistake(
             session_id,
             user_input,
-            None, // No AI response since it failed
+            None,
             error_type,
             &error.to_string(),
             context,
-        )?;
+        ).await?;
 
-        // Update learning pattern
         let pattern = format!("{}:{}", error_type, user_input.len());
-        self.update_learning_pattern(&pattern, false)?;
+        self.update_learning_pattern(&pattern, false).await?;
 
         Ok(())
     }
 
-    /// Build an enhanced prompt with relevant context from memories (with caching)
-    pub fn build_enhanced_prompt(&self, base_prompt: &str, prompt_cache: &Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>) -> Result<String> {
+    // Knowledge Store Delegation
+    pub async fn add_to_knowledge(&self, content: &str, metadata: serde_json::Value) -> Result<()> {
+        if let Some(store) = &self.knowledge_store {
+            store.add_text(content, metadata).await
+        } else {
+            // Silently ignore or return error?
+            // Since this is memory enhancement, maybe silent ignore or log is better than crashing
+            warn!("Knowledge store unavailable, skipping memory add");
+            Ok(())
+        }
+    }
+
+    pub async fn search_knowledge(&self, query: &str, limit: usize) -> Result<Vec<(String, f64)>> {
+        if let Some(store) = &self.knowledge_store {
+            let results = store.search(query, limit).await?;
+            Ok(results.into_iter().map(|(doc, score)| (doc.page_content, score)).collect())
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    pub async fn build_enhanced_prompt(&self, base_prompt: &str, prompt_cache: &Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>) -> Result<String> {
         let cache_key = format!("{:x}", md5::compute(base_prompt));
 
-        // Check cache first
         {
             let cache = prompt_cache.lock().unwrap();
             if let Some((cached_prompt, timestamp)) = cache.get(&cache_key) {
-                // Cache valid for 5 minutes
                 if timestamp.elapsed() < Duration::from_secs(300) {
                     return Ok(cached_prompt.clone());
                 }
             }
         }
 
-        // Build enhanced prompt
         let mut enhanced_prompt = base_prompt.to_string();
 
-        // Add air info from about_db
-        if let Ok(Some(creator)) = self.get_air_info("creator") {
+        if let Ok(Some(creator)) = self.get_air_info("creator").await {
             enhanced_prompt.push_str(&format!("\n\nSystem Info: Created by {}", creator));
         }
-        // Always identify as air
         enhanced_prompt.push_str("\n\nIdentity: You are 'air', an advanced AI agent.");
         
-        // Inject Capabilities
         enhanced_prompt.push_str("\n\nCapabilities:\n");
         enhanced_prompt.push_str("- Filesystem: Read, write, list, and analyze files and directories\n");
         enhanced_prompt.push_str("- Web: Search the internet and extract content from URLs\n");
         enhanced_prompt.push_str("- Command: Execute system commands (safe and unsafe with approval)\n");
         enhanced_prompt.push_str("- Memory: Store and recall information, manage long-term memory\n");
-        enhanced_prompt.push_str("- Planning: Create and execute step-by-step plans\n");
-        enhanced_prompt.push_str("- Calculator: Perform mathematical calculations\n");
-        enhanced_prompt.push_str("- Screenshot: Capture screen content for analysis\n");
-        enhanced_prompt.push_str("- Voice: Speak text and listen to voice input\n");
-        enhanced_prompt.push_str("- Knowledge: RAG system for indexing and querying documents\n");
+        enhanced_prompt.push_str("- Knowledge: RAG system. Use knowledge when available.\n");
 
-        // Inject Operational Procedures
         enhanced_prompt.push_str("\nOperational Procedures:\n");
-        enhanced_prompt.push_str("1. VERIFICATION LOOP: After making changes, ALWAYS verify the fix. If verification fails, analyze, fix again, and re-verify.\n");
-        enhanced_prompt.push_str("2. PLANNING: Before complex tasks, create a step-by-step plan.\n");
-        enhanced_prompt.push_str("3. ANTI-HALLUCINATION: Do not invent information. If unsure, check knowledge base or search web.\n");
-        enhanced_prompt.push_str("4. RECALL: Use memory tools to recall context if needed.\n");
+        enhanced_prompt.push_str("1. CHAIN OF THOUGHT: Think step-by-step before answering. Break down complex requests into smaller, manageable steps.\n");
+        enhanced_prompt.push_str("2. VERIFICATION LOOP: After making changes, ALWAYS verify the fix. If verification fails, analyze, fix again, and re-verify.\n");
+        enhanced_prompt.push_str("3. PLANNING: Before complex tasks, create a step-by-step plan.\n");
+        enhanced_prompt.push_str("4. ANTI-HALLUCINATION: Do not invent information. If unsure, check knowledge base or search web.\n");
+        enhanced_prompt.push_str("5. RECALL: Use memory tools to recall context if needed.\n");
 
-        // Inject Personality
-        enhanced_prompt.push_str("\nPersonality:\n");
-        enhanced_prompt.push_str("- Traits: Helpful, precise, proactive, transparent\n");
-        enhanced_prompt.push_str("- Tone: Professional yet conversational\n");
-        enhanced_prompt.push_str("- Style: Clear, concise, and structured. Be brief and avoid unnecessary verbosity. Only provide detailed explanations when explicitly asked or when critical for understanding.\n");
-
-        if let Ok(Some(version)) = self.get_air_info("version") {
+        if let Ok(Some(version)) = self.get_air_info("version").await {
             enhanced_prompt.push_str(&format!(" (v{})", version));
         }
 
-        // Add user preferences from rom_db
-        if let Ok(Some(preferences)) = self.get_user_preference("response_style") {
+        if let Ok(Some(preferences)) = self.get_user_preference("response_style").await {
             enhanced_prompt.push_str(&format!("\n\nUser Preference: Response style - {}", preferences));
         }
 
-        // Add recent conversation context from ram_db (last 3 conversations)
-        if let Ok(recent_convs) = self.get_recent_conversations(3) {
+        if let Ok(recent_convs) = self.get_recent_conversations(3).await {
             if !recent_convs.is_empty() {
                 enhanced_prompt.push_str("\n\nRecent Conversation Context:");
                 for (user, ai, _) in recent_convs {
@@ -578,8 +582,7 @@ impl MemoryManager {
             }
         }
 
-        // Add mistake insights from rom_db if relevant
-        if let Ok(insights) = self.get_mistake_insights(base_prompt) {
+        if let Ok(insights) = self.get_mistake_insights(base_prompt).await {
             if !insights.is_empty() {
                 enhanced_prompt.push_str("\n\nPast Issues to Avoid:");
                 for insight in insights {
@@ -588,24 +591,31 @@ impl MemoryManager {
             }
         }
 
-        // Add learning patterns from rom_db
-        let pattern = format!("query_length:{}", base_prompt.len());
-        if let Ok(Some((_mistakes, _successes, rate))) = self.get_learning_insights(&pattern) {
-            if rate < 0.7 { // If success rate is low, add caution
-                enhanced_prompt.push_str(&format!("\n\nCaution: This type of query has a {:.1}% success rate based on past interactions.", rate * 100.0));
+        // RAG Integration
+        // Automatically search knowledge base for relevant info
+        match self.search_knowledge(base_prompt, 2).await {
+            Ok(results) => {
+                if !results.is_empty() {
+                    enhanced_prompt.push_str("\n\nRelevant Knowledge from Memory:");
+                    for (content, score) in results {
+                        if score > 0.5 { // Only show highly relevant stuff
+                             enhanced_prompt.push_str(&format!("\n- {}", content));
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                // Ignore RAG errors silently or log them
+                info!("RAG search failed: {}", e);
             }
         }
 
-        // Cache the result
         {
             let mut cache = prompt_cache.lock().unwrap();
             cache.insert(cache_key, (enhanced_prompt.clone(), std::time::Instant::now()));
-
-            // Limit cache size to 100 entries
             if cache.len() > 100 {
-                // Remove oldest entries (simple LRU approximation)
                 let keys_to_remove: Vec<String> = cache.iter()
-                    .filter(|(_, (_, timestamp))| timestamp.elapsed() > Duration::from_secs(600)) // 10 minutes
+                    .filter(|(_, (_, timestamp))| timestamp.elapsed() > Duration::from_secs(600))
                     .map(|(k, _)| k.clone())
                     .collect();
                 for key in keys_to_remove {

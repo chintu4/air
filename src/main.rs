@@ -94,8 +94,8 @@ async fn main() -> Result<()> {
         Some(Commands::Memory { command }) => {
             match command {
                 MemoryCommands::Add { path } => {
-                    let tool = tools::KnowledgeTool::new()?;
-                    match tool.add_file(&path) {
+                    let tool = tools::KnowledgeTool::new().await?;
+                    match tool.add_file(&path).await {
                         Ok(msg) => println!("✅ {}", msg),
                         Err(e) => println!("❌ Failed to add file: {}", e),
                     }
