@@ -1,0 +1,9 @@
+[package]
+name = "repro"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hf-hub = "0.3"
+tokenizers = "0.20"
+anyhow = "1.0"

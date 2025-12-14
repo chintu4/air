@@ -7,6 +7,7 @@ use std::fs;
 use dotenv;
 use regex::Regex;
 use std::path::Path;
+use std::path::PathBuf;
 
 use air::agent::AIAgent;
 use air::config::Config;
@@ -43,6 +44,8 @@ enum Commands {
         #[command(subcommand)]
         command: MemoryCommands,
     },
+    /// Configure model availability
+    Config,
 }
 
 #[derive(Subcommand)]
@@ -103,6 +106,10 @@ async fn main() -> Result<()> {
             }
             return Ok(());
         },
+        Some(Commands::Config) => {
+            handle_config_mode().await?;
+            return Ok(());
+        }
         None => {}
     }
 
@@ -121,6 +128,78 @@ async fn main() -> Result<()> {
         run_single_query(agent, args).await?;
     }
     
+    Ok(())
+}
+
+async fn handle_config_mode() -> Result<()> {
+    use std::io::{self, Write};
+
+    println!("\n⚙️  AIR Model Configuration");
+    println!("══════════════════════════");
+
+    // Load config directly (no need for agent)
+    let mut config = match Config::load() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("❌ Failed to load configuration: {}", e);
+            return Ok(());
+        }
+    };
+
+    loop {
+        println!("\nAvailable Models:");
+        println!("  0. 💾 Save & Exit");
+        println!("  ----------------");
+
+        let local_status = if config.local_model.enabled { "✅ Enabled" } else { "❌ Disabled" };
+        println!("  1. Local Model ({})  [{}]", config.local_model.model_path, local_status);
+
+        let mut idx = 2;
+        for provider in &config.cloud_providers {
+            let status = if provider.enabled { "✅ Enabled" } else { "❌ Disabled" };
+            println!("  {}. Cloud: {}  [{}]", idx, provider.name, status);
+            idx += 1;
+        }
+
+        print!("\nSelect a number to toggle (0-{}): ", idx - 1);
+        io::stdout().flush()?;
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+
+        match input.trim().parse::<usize>() {
+            Ok(0) => {
+                // Save config
+                let app_data = dirs::data_dir()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .or_else(|| std::env::var("APPDATA").ok())
+                    .or_else(|| std::env::var("LOCALAPPDATA").ok())
+                    .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+
+                let config_dir = PathBuf::from(app_data).join("air");
+                std::fs::create_dir_all(&config_dir)?;
+                let config_path = config_dir.join("config.toml");
+
+                let toml_string = toml::to_string_pretty(&config)?;
+                std::fs::write(&config_path, toml_string)?;
+                println!("✅ Configuration saved!");
+                break;
+            }
+            Ok(1) => {
+                config.local_model.enabled = !config.local_model.enabled;
+                println!("  > Local model toggled.");
+            }
+            Ok(n) if n > 1 && n < idx => {
+                let provider_idx = n - 2;
+                if let Some(provider) = config.cloud_providers.get_mut(provider_idx) {
+                    provider.enabled = !provider.enabled;
+                    println!("  > {} toggled.", provider.name);
+                }
+            }
+            _ => println!("❌ Invalid selection"),
+        }
+    }
+
     Ok(())
 }
 
@@ -235,6 +314,28 @@ async fn handle_local_setup() -> Result<()> {
         } else {
             println!("❌ Failed to download model: {}", response.status());
             return Ok(());
+        }
+    }
+
+    // Download tokenizer.json
+    let tokenizer_filename = "tokenizer.json";
+    let tokenizer_path = models_dir.join(tokenizer_filename);
+
+    if tokenizer_path.exists() {
+        println!("✅ Tokenizer already exists at: {:?}", tokenizer_path);
+    } else {
+        println!("⚠️  Tokenizer not found.");
+        println!("Downloading tokenizer...");
+
+        let url = "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json";
+        let response = reqwest::get(url).await?;
+
+        if response.status().is_success() {
+            let content = response.bytes().await?;
+            std::fs::write(&tokenizer_path, content)?;
+            println!("✅ Successfully downloaded tokenizer to: {:?}", tokenizer_path);
+        } else {
+            println!("❌ Failed to download tokenizer: {}", response.status());
         }
     }
 

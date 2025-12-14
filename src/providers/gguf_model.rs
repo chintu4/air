@@ -31,7 +31,7 @@ impl GGUFModel {
         let tokenizer = match Self::load_tokenizer(&model_path) {
             Ok(t) => t,
             Err(e) => {
-                warn!("Could not find local tokenizer.json: {}. Attempting download...", e);
+                warn!("Could not find valid local tokenizer.json: {}. Attempting download...", e);
                 let api = Api::new()?;
                 let repo = api.model("TinyLlama/TinyLlama-1.1B-Chat-v1.0".to_string());
                 let path = repo.get("tokenizer.json")?;
@@ -46,10 +46,24 @@ impl GGUFModel {
     fn load_tokenizer(model_path: &PathBuf) -> Result<Tokenizer> {
         let parent = model_path.parent().unwrap();
         let json_path = parent.join("tokenizer.json");
+
         if json_path.exists() {
-            return Tokenizer::from_file(json_path).map_err(Error::msg);
+            match Tokenizer::from_file(&json_path) {
+                Ok(t) => return Ok(t),
+                Err(e) => {
+                    warn!("Found local tokenizer.json but it failed to load: {}", e);
+                    // If the error indicates a missing model structure or other corruption, delete it.
+                    // The error "Model missing" is typical for empty/invalid JSON that isn't a tokenizer.
+                    // We'll conservatively delete it if it fails to load at all, to force a refresh.
+                    if let Err(del_err) = std::fs::remove_file(&json_path) {
+                        warn!("Failed to delete corrupted tokenizer.json: {}", del_err);
+                    } else {
+                        info!("Deleted corrupted tokenizer.json to trigger redownload.");
+                    }
+                }
+            }
         }
-        Err(anyhow!("tokenizer.json not found"))
+        Err(anyhow!("tokenizer.json not found or corrupted"))
     }
 
     pub fn generate(&mut self, prompt: &str, max_tokens: usize, temperature: f64) -> Result<(String, u32, u64)> {
