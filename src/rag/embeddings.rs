@@ -4,7 +4,6 @@ use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{api::sync::ApiBuilder, Repo, RepoType};
 use tokenizers::{PaddingParams, Tokenizer};
-use std::path::PathBuf;
 
 pub struct EmbeddingModel {
     model: BertModel,
