@@ -154,7 +154,7 @@ impl Default for Config {
             performance: PerformanceConfig {
                 fallback_threshold_ms: 3000,
                 quality_threshold: 0.8,
-                local_timeout_seconds: 10,
+                local_timeout_seconds: 60,
             },
         }
     }
