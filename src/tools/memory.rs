@@ -109,20 +109,6 @@ impl MemoryTool {
             last_activity: conversations.last().unwrap().timestamp,
         }
     }
-    
-    fn search_conversations(&self, query: &str) -> Vec<ConversationEntry> {
-        let conversations = self.conversations.lock().unwrap();
-        let query_lower = query.to_lowercase();
-        
-        conversations.iter()
-            .filter(|entry| {
-                entry.user_input.to_lowercase().contains(&query_lower) ||
-                entry.ai_response.to_lowercase().contains(&query_lower) ||
-                entry.context.as_ref().map_or(false, |c| c.to_lowercase().contains(&query_lower))
-            })
-            .cloned()
-            .collect()
-    }
 }
 
 #[async_trait]

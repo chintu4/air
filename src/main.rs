@@ -3,10 +3,7 @@ use clap::{Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber;
 use std::io::{self, Write};
-use std::fs;
 use dotenv;
-use regex::Regex;
-use std::path::Path;
 use std::path::PathBuf;
 
 use air::agent::AIAgent;

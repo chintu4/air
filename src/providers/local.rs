@@ -1,14 +1,17 @@
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use std::path::PathBuf;
-
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use crate::models::{ModelProvider, ModelResponse, QueryContext};
-use crate::providers::gguf_model::GGUFModel;
 use crate::config::LocalModelConfig;
+use mistralrs::{
+    GgufModelBuilder, Model,
+    ChatCompletionResponse, TextMessageRole,
+    TextMessages,
+};
 
 struct LocalState {
-    model: Option<GGUFModel>,
+    model: Option<Arc<Model>>,
 }
 
 pub struct LocalProvider {
@@ -26,21 +29,26 @@ impl LocalProvider {
         })
     }
 
-    fn ensure_loaded(&self) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
+    async fn ensure_loaded(&self) -> Result<()> {
+        let mut state = self.state.lock().await;
         if state.model.is_some() {
             return Ok(());
         }
 
-        let model_path = PathBuf::from(&self.config.model_path);
-        if !model_path.exists() {
+        let model_path = self.config.model_path.clone();
+        if !std::path::Path::new(&model_path).exists() {
             return Err(anyhow!("Model file not found at: {:?}. Run 'air setup --local' first.", model_path));
         }
 
-        // Use GGUFModel to load the model and tokenizer
-        let model = GGUFModel::load(&model_path)?;
+        // Initialize mistralrs GGUF model
+        let builder = GgufModelBuilder::new(
+             model_path,
+             Vec::<String>::new() // No LoRA adapters for now
+        );
 
-        state.model = Some(model);
+        let model = builder.build().await?;
+
+        state.model = Some(model.into());
         Ok(())
     }
 }
@@ -48,46 +56,49 @@ impl LocalProvider {
 #[async_trait]
 impl ModelProvider for LocalProvider {
     fn name(&self) -> &str {
-        "local-candle"
+        "mistralrs-local"
     }
 
     fn is_available(&self) -> bool {
-        PathBuf::from(&self.config.model_path).exists()
+        std::path::Path::new(&self.config.model_path).exists()
     }
 
     fn estimated_latency_ms(&self) -> u64 {
-        500
+        200
     }
 
     fn quality_score(&self) -> f32 {
-        0.7
+        0.8
     }
 
     async fn generate(&self, context: &QueryContext) -> Result<ModelResponse> {
-        self.ensure_loaded()?;
+        self.ensure_loaded().await?;
 
-        // We clone the state wrapper to move into the blocking task
-        let state_arc = self.state.clone();
-        let prompt = context.prompt.clone();
-        let temperature = context.temperature as f64;
-        let max_tokens = context.max_tokens as usize;
+        let state = self.state.lock().await;
+        let model = state.model.as_ref().unwrap().clone();
 
-        // Run inference in a blocking thread to avoid blocking the async runtime
-        let result = tokio::task::spawn_blocking(move || {
-            let mut state = state_arc.lock().unwrap();
-            let model = state.model.as_mut().unwrap();
+        let start_time = std::time::Instant::now();
 
-            let (response_text, tokens_count, time_ms) = model.generate(&prompt, max_tokens, temperature)?;
+        // Create the messages
+        let messages = TextMessages::new()
+            .add_message(TextMessageRole::User, context.prompt.clone());
 
-            Ok::<ModelResponse, anyhow::Error>(ModelResponse {
-                content: response_text,
-                model_used: "TinyLlama-1.1B-Quantized".to_string(),
-                tokens_used: tokens_count,
-                response_time_ms: time_ms,
-                confidence_score: None,
-            })
-        }).await??;
+        // Send request to the model
+        // According to recent error, this returns ChatCompletionResponse directly
+        let response: ChatCompletionResponse = model.send_chat_request(messages).await?;
 
-        Ok(result)
+        let content = response.choices.first()
+            .map(|c| c.message.content.clone().unwrap_or_default())
+            .unwrap_or_default();
+
+        let tokens_used = response.usage.total_tokens as usize;
+
+        Ok(ModelResponse {
+            content,
+            model_used: "mistralrs-gguf".to_string(),
+            tokens_used: tokens_used.try_into().unwrap_or(0),
+            response_time_ms: start_time.elapsed().as_millis() as u64,
+            confidence_score: None,
+        })
     }
 }
