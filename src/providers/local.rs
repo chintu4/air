@@ -41,11 +41,20 @@ impl LocalProvider {
         }
 
         // Initialize mistralrs GGUF model
+
+        let path = std::path::Path::new(&model_path);
+        let parent = path.parent().unwrap_or(std::path::Path::new("."));
+        let filename = path.file_name()
+            .ok_or_else(|| anyhow!("Invalid model filename"))?
+            .to_str()
+            .ok_or_else(|| anyhow!("Invalid filename string"))?;
+
         let builder = GgufModelBuilder::new(
-             model_path,
-             Vec::<String>::new() // No LoRA adapters for now
+             parent.to_string_lossy(),
+             vec![filename.to_string()]
         );
 
+ 
         let model = builder.build().await?;
 
         state.model = Some(model.into());
