@@ -5,6 +5,7 @@ use tracing_subscriber;
 use std::io::{self, Write};
 use dotenv;
 use std::path::PathBuf;
+use std::collections::HashSet;
 
 use air::agent::AIAgent;
 use air::config::Config;
@@ -113,7 +114,12 @@ async fn main() -> Result<()> {
     info!("Starting AIR Agent...");
 
     // Load configuration
-    let config = Config::load()?;
+    let mut config = Config::load()?;
+
+    // Ensure model is selected if local is enabled
+    if config.local_model.enabled {
+        ensure_model_selected(&mut config)?;
+    }
     
     // Initialize AI Agent
     let agent = AIAgent::new(config).await?;
@@ -150,6 +156,7 @@ async fn handle_config_mode() -> Result<()> {
 
         let local_status = if config.local_model.enabled { "✅ Enabled" } else { "❌ Disabled" };
         println!("  1. Local Model ({})  [{}]", config.local_model.model_path, local_status);
+        println!("     (Select '1' to toggle, 'm' to change model)");
 
         let mut idx = 2;
         for provider in &config.cloud_providers {
@@ -158,27 +165,26 @@ async fn handle_config_mode() -> Result<()> {
             idx += 1;
         }
 
-        print!("\nSelect a number to toggle (0-{}): ", idx - 1);
+        print!("\nSelect a number to toggle, or 'm' to change local model (0-{}): ", idx - 1);
         io::stdout().flush()?;
 
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
+        let input = input.trim();
 
-        match input.trim().parse::<usize>() {
+        if input.eq_ignore_ascii_case("m") {
+             let models = scan_for_models(&config);
+             if models.is_empty() {
+                 println!("❌ No models found to select.");
+             } else {
+                 prompt_model_selection(&mut config, &models)?;
+             }
+             continue;
+        }
+
+        match input.parse::<usize>() {
             Ok(0) => {
-                // Save config
-                let app_data = dirs::data_dir()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .or_else(|| std::env::var("APPDATA").ok())
-                    .or_else(|| std::env::var("LOCALAPPDATA").ok())
-                    .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
-
-                let config_dir = PathBuf::from(app_data).join("air");
-                std::fs::create_dir_all(&config_dir)?;
-                let config_path = config_dir.join("config.toml");
-
-                let toml_string = toml::to_string_pretty(&config)?;
-                std::fs::write(&config_path, toml_string)?;
+                save_config(&config)?;
                 println!("✅ Configuration saved!");
                 break;
             }
@@ -454,6 +460,156 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
         }
     }
     
+    Ok(())
+}
+
+// --- Model Selection Helpers ---
+
+fn save_config(config: &Config) -> Result<()> {
+    let app_data = dirs::data_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .or_else(|| std::env::var("APPDATA").ok())
+        .or_else(|| std::env::var("LOCALAPPDATA").ok())
+        .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+
+    let config_dir = PathBuf::from(app_data).join("air");
+    std::fs::create_dir_all(&config_dir)?;
+    let config_path = config_dir.join("config.toml");
+
+    let toml_string = toml::to_string_pretty(config)?;
+    std::fs::write(&config_path, toml_string)?;
+    Ok(())
+}
+
+fn scan_for_models(config: &Config) -> Vec<PathBuf> {
+    let mut models = Vec::new();
+    let mut visited = HashSet::new();
+    let mut search_dirs = Vec::new();
+
+    // 1. Configured path's parent
+    if let Some(parent) = PathBuf::from(&config.local_model.model_path).parent() {
+        if parent.exists() {
+             search_dirs.push(parent.to_path_buf());
+        }
+    }
+
+    // 2. C:\models (Windows)
+    if cfg!(windows) {
+        search_dirs.push(PathBuf::from(r"C:\models"));
+    }
+
+    // 3. ~/.air/models
+    if let Some(home) = dirs::home_dir() {
+        search_dirs.push(home.join(".air").join("models"));
+    }
+
+    // 4. Current dir models
+    if let Ok(cwd) = std::env::current_dir() {
+        search_dirs.push(cwd.join("models"));
+    }
+
+    for dir in search_dirs {
+         if dir.exists() {
+            scan_dir_recursive(&dir, &mut models, &mut visited);
+         }
+    }
+
+    models
+}
+
+fn scan_dir_recursive(dir: &PathBuf, models: &mut Vec<PathBuf>, visited: &mut HashSet<PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("gguf") {
+                         // Normalize path to avoid duplicates
+                         if visited.insert(path.clone()) {
+                            models.push(path);
+                        }
+                    }
+                }
+            } else if path.is_dir() {
+                 // Prevent infinite recursion loops with symlinks if necessary,
+                 // but simple recursion is usually fine for this depth.
+                 // We don't track visited dirs here, but visited files handles dupes.
+                 scan_dir_recursive(&path, models, visited);
+            }
+        }
+    }
+}
+
+fn prompt_model_selection(config: &mut Config, models: &[PathBuf]) -> Result<()> {
+    println!("\n🔍 Found multiple local models. Please select one:");
+    for (i, model) in models.iter().enumerate() {
+        println!("  {}. {}", i + 1, model.display());
+    }
+
+    print!("\nEnter number (1-{}): ", models.len());
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+
+    if let Ok(n) = input.trim().parse::<usize>() {
+        if n > 0 && n <= models.len() {
+            let selected = &models[n - 1];
+            println!("✅ Selected: {}", selected.display());
+            config.local_model.model_path = selected.to_string_lossy().to_string();
+            save_config(config)?;
+        } else {
+            println!("❌ Invalid selection. Using current default.");
+        }
+    } else {
+        println!("❌ Invalid input. Using current default.");
+    }
+
+    Ok(())
+}
+
+fn ensure_model_selected(config: &mut Config) -> Result<()> {
+    let models = scan_for_models(config);
+
+    if models.is_empty() {
+        println!("⚠️  No local models (GGUF) found.");
+        println!("   Please run 'air setup --local' to download a model,");
+        println!("   or place your .gguf files in C:\\models or ~/.air/models.");
+        return Ok(());
+    }
+
+    let default_path = "C:\\models\\tinyllama-1.1b-chat-v1.0.Q2_K.gguf";
+    let current_path = PathBuf::from(&config.local_model.model_path);
+
+    // Check if the current configured path actually exists
+    let current_exists = current_path.exists();
+
+    // Logic:
+    // 1. If currently configured model exists, we respect it (persistence).
+    //    UNLESS it's the hardcoded default AND we have multiple choices (ambiguous first run).
+    // 2. If currently configured model MISSING, we must select one.
+
+    let is_default_string = config.local_model.model_path == default_path;
+
+    if !current_exists {
+        // Current config is broken/missing.
+        if models.len() == 1 {
+            // Auto-select the only one
+            let path = models[0].to_string_lossy().to_string();
+            println!("ℹ️  Auto-selecting available model: {}", path);
+            config.local_model.model_path = path;
+            save_config(config)?;
+        } else {
+            // Multiple choices, must ask
+            prompt_model_selection(config, &models)?;
+        }
+    } else if is_default_string && models.len() > 1 {
+        // It exists (so user has the default model), BUT they have others too.
+        // And they haven't changed the config string (it's still default).
+        // This implies they might want to choose.
+        prompt_model_selection(config, &models)?;
+    }
+
     Ok(())
 }
 
