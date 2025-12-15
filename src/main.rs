@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
 }
 
 async fn handle_config_mode() -> Result<()> {
-    use std::io::{self, Write};
+    use inquire::{Select, Text, validator::Validation};
 
     println!("\n⚙️  AIR Model Configuration");
     println!("══════════════════════════");
@@ -150,56 +150,87 @@ async fn handle_config_mode() -> Result<()> {
     };
 
     loop {
-        println!("\nAvailable Models:");
-        println!("  0. 💾 Save & Exit");
-        println!("  ----------------");
-
+        // Build menu options dynamically
         let local_status = if config.local_model.enabled { "✅ Enabled" } else { "❌ Disabled" };
-        println!("  1. Local Model ({})  [{}]", config.local_model.model_path, local_status);
-        println!("     (Select '1' to toggle, 'm' to change model)");
+        let local_model_name = std::path::Path::new(&config.local_model.model_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
 
-        let mut idx = 2;
+        let mut options = vec![
+            format!("Save & Exit"),
+            format!("Local Model: {} [{}]", local_model_name, local_status),
+            format!("Set Local Timeout (Current: {}s)", config.performance.local_timeout_seconds),
+            format!("Change Local Model File"),
+        ];
+
+        // Cloud providers
         for provider in &config.cloud_providers {
             let status = if provider.enabled { "✅ Enabled" } else { "❌ Disabled" };
-            println!("  {}. Cloud: {}  [{}]", idx, provider.name, status);
-            idx += 1;
+            options.push(format!("Cloud: {} [{}]", provider.name, status));
         }
 
-        print!("\nSelect a number to toggle, or 'm' to change local model (0-{}): ", idx - 1);
-        io::stdout().flush()?;
+        let selection = Select::new("Select an option:", options.clone())
+            .with_page_size(10)
+            .prompt();
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let input = input.trim();
+        match selection {
+            Ok(choice) => {
+                // Find index of choice in original list to determine action
+                let index = options.iter().position(|r| r == &choice).unwrap();
 
-        if input.eq_ignore_ascii_case("m") {
-             let models = scan_for_models(&config);
-             if models.is_empty() {
-                 println!("❌ No models found to select.");
-             } else {
-                 prompt_model_selection(&mut config, &models)?;
-             }
-             continue;
-        }
+                match index {
+                    0 => { // Save & Exit
+                        save_config(&config)?;
+                        println!("✅ Configuration saved!");
+                        break;
+                    }
+                    1 => { // Toggle Local Model
+                        config.local_model.enabled = !config.local_model.enabled;
+                    }
+                    2 => { // Set Timeout
+                        let current = config.performance.local_timeout_seconds.to_string();
+                        let validator = |input: &str| {
+                            if input.parse::<u64>().is_ok() {
+                                Ok(Validation::Valid)
+                            } else {
+                                Ok(Validation::Invalid("Please enter a valid number of seconds".into()))
+                            }
+                        };
 
-        match input.parse::<usize>() {
-            Ok(0) => {
-                save_config(&config)?;
-                println!("✅ Configuration saved!");
-                break;
-            }
-            Ok(1) => {
-                config.local_model.enabled = !config.local_model.enabled;
-                println!("  > Local model toggled.");
-            }
-            Ok(n) if n > 1 && n < idx => {
-                let provider_idx = n - 2;
-                if let Some(provider) = config.cloud_providers.get_mut(provider_idx) {
-                    provider.enabled = !provider.enabled;
-                    println!("  > {} toggled.", provider.name);
+                        let ans = Text::new("Enter timeout in seconds:")
+                            .with_default(&current)
+                            .with_validator(validator)
+                            .prompt();
+
+                        if let Ok(value) = ans {
+                            if let Ok(seconds) = value.parse::<u64>() {
+                                config.performance.local_timeout_seconds = seconds;
+                                println!("✅ Timeout updated to {}s", seconds);
+                            }
+                        }
+                    }
+                    3 => { // Change Local Model File
+                         let models = scan_for_models(&config);
+                         if models.is_empty() {
+                             println!("❌ No models found to select.");
+                         } else {
+                             prompt_model_selection(&mut config, &models)?;
+                         }
+                    }
+                    _ => { // Toggle Cloud Provider
+                        // Cloud providers start at index 4
+                        let provider_idx = index - 4;
+                        if let Some(provider) = config.cloud_providers.get_mut(provider_idx) {
+                             provider.enabled = !provider.enabled;
+                        }
+                    }
                 }
             }
-            _ => println!("❌ Invalid selection"),
+            Err(_) => {
+                println!("Operation cancelled.");
+                break;
+            }
         }
     }
 
@@ -541,28 +572,21 @@ fn scan_dir_recursive(dir: &PathBuf, models: &mut Vec<PathBuf>, visited: &mut Ha
 }
 
 fn prompt_model_selection(config: &mut Config, models: &[PathBuf]) -> Result<()> {
-    println!("\n🔍 Found multiple local models. Please select one:");
-    for (i, model) in models.iter().enumerate() {
-        println!("  {}. {}", i + 1, model.display());
-    }
+    use inquire::Select;
 
-    print!("\nEnter number (1-{}): ", models.len());
-    io::stdout().flush()?;
+    let options: Vec<String> = models.iter()
+        .map(|p| p.display().to_string())
+        .collect();
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
+    let selection = Select::new("🔍 Select a local model:", options).prompt();
 
-    if let Ok(n) = input.trim().parse::<usize>() {
-        if n > 0 && n <= models.len() {
-            let selected = &models[n - 1];
-            println!("✅ Selected: {}", selected.display());
-            config.local_model.model_path = selected.to_string_lossy().to_string();
+    match selection {
+        Ok(choice) => {
+            println!("✅ Selected: {}", choice);
+            config.local_model.model_path = choice;
             save_config(config)?;
-        } else {
-            println!("❌ Invalid selection. Using current default.");
         }
-    } else {
-        println!("❌ Invalid input. Using current default.");
+        Err(_) => println!("❌ Selection cancelled. Using current default."),
     }
 
     Ok(())

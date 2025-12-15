@@ -46,6 +46,7 @@ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-native-tls"] }
 flate2 = "1.1.6"
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", version = "0.6.0" }
 indexmap = "2.12.1"
+inquire = "0.7"
 
 
 [dev-dependencies]
