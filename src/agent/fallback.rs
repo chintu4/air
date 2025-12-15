@@ -2,7 +2,6 @@ use crate::models::ModelResponse;
 use crate::agent::memory::MemoryManager;
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
 
 #[async_trait]
 pub trait FallbackStrategy: Send + Sync {

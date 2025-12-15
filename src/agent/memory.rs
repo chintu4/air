@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool, Row};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

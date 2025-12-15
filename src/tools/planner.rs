@@ -50,14 +50,12 @@ pub struct Plan {
 
 pub struct PlannerTool {
     tasks: std::sync::Arc<std::sync::Mutex<HashMap<String, Task>>>,
-    plans: std::sync::Arc<std::sync::Mutex<HashMap<String, Plan>>>,
 }
 
 impl PlannerTool {
     pub fn new() -> Self {
         Self {
             tasks: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
-            plans: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
     
