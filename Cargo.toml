@@ -41,7 +41,7 @@ dirs = "5.0"
 md5 = "0.8.0"
 # rusqlite removed to avoid conflict with sqlx
 tokenizer = "0.1.2"
-sqlx = "0.8.6"
+sqlx = { version = "0.8.6", features = ["sqlite", "macros", "runtime-tokio-rustls"] }
 flate2 = "1.1.7"
 langchain-rust = "4.6.0"
 

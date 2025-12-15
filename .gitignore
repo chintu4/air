@@ -1,4 +1,5 @@
 ﻿.env
+.air
 /target/
 /__pycache__/
 /tests/
