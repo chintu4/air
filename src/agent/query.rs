@@ -200,10 +200,15 @@ impl QueryProcessor {
 
         // Build enhanced prompt with context
         let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+
+        // Build structured prompt for local models (Prefix Caching)
+        let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
+
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
             prompt: enhanced_prompt,
+            messages: structured_messages,
             max_tokens: config.local_model.max_tokens,
             temperature: config.local_model.temperature,
             timeout: Duration::from_secs(config.performance.local_timeout_seconds),
@@ -278,10 +283,15 @@ impl QueryProcessor {
 
         // Build enhanced prompt with context
         let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+
+        // Build structured prompt for local models (Prefix Caching)
+        let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
+
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
             prompt: enhanced_prompt,
+            messages: structured_messages,
             max_tokens: config.local_model.max_tokens,
             temperature: config.local_model.temperature,
             timeout: Duration::from_secs(config.performance.local_timeout_seconds),
@@ -309,10 +319,15 @@ impl QueryProcessor {
 
         // Build enhanced prompt with context
         let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+
+        // Build structured prompt for local models (Prefix Caching) - Optional for cloud
+        let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
+
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
             prompt: enhanced_prompt,
+            messages: structured_messages,
             max_tokens: 1000, // Use higher limit for cloud
             temperature: 0.7,
             timeout: Duration::from_secs(30),
@@ -345,6 +360,7 @@ impl QueryProcessor {
 
         let context = QueryContext {
             prompt: enhanced_prompt,
+            messages: None, // pure_mode doesn't use structured caching yet
             max_tokens: config.local_model.max_tokens,
             temperature: config.local_model.temperature,
             timeout: Duration::from_secs(config.performance.local_timeout_seconds),

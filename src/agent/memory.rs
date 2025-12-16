@@ -6,6 +6,7 @@ use tracing::{info, warn};
 use md5;
 use crate::rag::store::KnowledgeStore;
 use crate::rag::langchain_embedding::CandleEmbedder;
+use crate::models::Message;
 
 #[derive(Debug, Clone)]
 pub struct Conversation {
@@ -606,5 +607,102 @@ warning:
         }
 
         Ok(enhanced_prompt)
+    }
+
+    pub async fn build_structured_prompt(&self, base_prompt: &str) -> Result<Vec<Message>> {
+        let mut messages = Vec::new();
+
+        // 1. System Identity (Fixed Prefix)
+        const AIR_IDENTITY_BLOCK: &str = r#"
+You are AIR. This identity is fixed.
+```json
+{
+  "tool": "tool_name",
+  "function": "function_name",
+  "args": {
+    "arg1": "value1",
+    "arg2": "value2"
+  }
+}
+```
+use format the JSON block for tool access.
+After the tool is executed, the system will provide you with the result.
+If no tool is needed, respond in natural language.
+warning:
+1. Do not invent shell commands.Ask user before using write or update command.use read command directly.
+"#;
+
+        let mut system_prompt = AIR_IDENTITY_BLOCK.to_string();
+
+        if let Ok(Some(version)) = self.get_air_info("version").await {
+            system_prompt.push_str(&format!(" (v{})", version));
+        }
+
+        if let Ok(Some(preferences)) = self.get_user_preference("response_style").await {
+            system_prompt.push_str(&format!("\n\nUser Preference: Response style - {}", preferences));
+        }
+
+        messages.push(Message {
+            role: "system".to_string(),
+            content: system_prompt,
+        });
+
+        // 2. Recent Conversation History (Stable sequence)
+        // Note: get_recent_conversations returns reverse chronological, so we reversed it in the method to be chronological.
+        // It returns (user, ai, timestamp).
+        if let Ok(recent_convs) = self.get_recent_conversations(5).await { // Increased context for structured mode
+            for (user, ai, _) in recent_convs {
+                messages.push(Message {
+                    role: "user".to_string(),
+                    content: user,
+                });
+                messages.push(Message {
+                    role: "assistant".to_string(),
+                    content: ai,
+                });
+            }
+        }
+
+        // 3. Current Context (Mistakes + RAG)
+        // We append this to the current user query to keep the history clean/reusable.
+        let mut user_context = String::new();
+
+        if let Ok(insights) = self.get_mistake_insights(base_prompt).await {
+            if !insights.is_empty() {
+                user_context.push_str("Past Issues to Avoid:\n");
+                for insight in insights {
+                    user_context.push_str(&format!("- {}\n", insight));
+                }
+                user_context.push_str("\n");
+            }
+        }
+
+        match self.search_knowledge(base_prompt, 2).await {
+            Ok(results) => {
+                if !results.is_empty() {
+                    user_context.push_str("Relevant Knowledge from Memory:\n");
+                    for (content, score) in results {
+                        if score > 0.5 {
+                             user_context.push_str(&format!("- {}\n", content));
+                        }
+                    }
+                    user_context.push_str("\n");
+                }
+            },
+            Err(e) => info!("RAG search failed: {}", e),
+        }
+
+        let final_user_message = if !user_context.is_empty() {
+            format!("{}\nUser says:\n{}", user_context, base_prompt)
+        } else {
+            base_prompt.to_string()
+        };
+
+        messages.push(Message {
+            role: "user".to_string(),
+            content: final_user_message,
+        });
+
+        Ok(messages)
     }
 }
