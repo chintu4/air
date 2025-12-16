@@ -16,8 +16,14 @@ pub struct LocalModelConfig {
     pub temperature: f32,
     pub context_length: u32,
     pub threads: u32,
+    #[serde(default = "default_device")]
+    pub device: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+}
+
+fn default_device() -> String {
+    "cpu".to_string()
 }
 
 impl Default for LocalModelConfig {
@@ -27,7 +33,8 @@ impl Default for LocalModelConfig {
             max_tokens: 512,
             temperature: 0.7,
             context_length: 2048,
-            threads: 0,
+            threads: 4,
+            device: "cpu".to_string(),
             enabled: true,
         }
     }
