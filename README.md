@@ -23,8 +23,10 @@ Whether you need to chat, analyze documents, capture screenshots, or browse the 
 ---
 
 ## 📦 Installation
+You can check out [air](https://github.com/chintu4/air) 's release section to download latest version for desktop type
+( or )
 
-Currently, AIR is available for installation via Rust's package manager, `cargo`.
+AIR is available for installation via Rust's package manager, `cargo`.
 
 ### Prerequisites
 *   **Rust**: Install from [rustup.rs](https://rustup.rs)
