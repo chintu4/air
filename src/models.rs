@@ -19,9 +19,16 @@ impl fmt::Display for ModelResponse {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct QueryContext {
     pub prompt: String,
+    pub messages: Option<Vec<Message>>,
     pub max_tokens: u32,
     pub temperature: f32,
     pub timeout: Duration,

@@ -12,6 +12,7 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalModelConfig {
     pub model_path: String,
+    pub draft_model_path: Option<String>,
     pub max_tokens: u32,
     pub temperature: f32,
     pub context_length: u32,
@@ -23,18 +24,19 @@ pub struct LocalModelConfig {
 }
 
 fn default_device() -> String {
-    "cpu".to_string()
+    "cuda".to_string()
 }
 
 impl Default for LocalModelConfig {
     fn default() -> Self {
         Self {
             model_path: "C:\\models\\tinyllama-1.1b-chat-v1.0.Q2_K.gguf".to_string(),
+            draft_model_path: None,
             max_tokens: 512,
             temperature: 0.7,
             context_length: 2048,
             threads: 4,
-            device: "cpu".to_string(),
+            device: "cuda".to_string(),
             enabled: true,
         }
     }
