@@ -155,11 +155,24 @@ impl ModelProvider for LocalProvider {
                 .add_message(TextMessageRole::User, context.prompt.clone())
         };
 
-        let request = RequestBuilder::from(messages)
+        let mut request_builder = RequestBuilder::from(messages)
             .set_sampler_max_len(context.max_tokens as usize)
             .set_sampler_temperature(context.temperature as f64)
             .set_sampler_topp(0.9)
             .set_sampler_topk(40);
+
+        // FIX 2: Grammar Constraint for Small Models
+        // If config says small model, force JSON structure
+        if self.config.is_small_model {
+             // Simple regex to force JSON-like structure: { "tool": "...", "args": { ... } }
+             // let pattern = r#"\s*\{\s*"tool"\s*:\s*"[a-zA-Z0-9_]+"\s*,\s*"args"\s*:\s*\{[\s\S]*\}\s*\}"#;
+             // request_builder = request_builder.set_grammar(mistralrs::Grammar::Regex(pattern.to_string()));
+             // TODO: Re-enable strict grammar when mistralrs API is confirmed or updated
+             // For now, we rely on the few-shot examples to guide the model.
+             info!("🚀 Small model optimization active (simplified prompt). Grammar enforcement pending API update.");
+        }
+
+        let request = request_builder;
 
         let mut stream = model.stream_chat_request(request).await?;
         let mut content = String::new();

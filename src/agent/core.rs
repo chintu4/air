@@ -2,6 +2,7 @@ use crate::models::{ModelProvider, ModelResponse};
 use crate::providers::{LocalProvider, OpenAIProvider, AnthropicProvider, GeminiProvider, OpenRouterProvider};
 use crate::config::Config;
 use crate::tools::ToolManager;
+use crate::utils::model_inspector;
 use crate::agent::memory::MemoryManager;
 use crate::agent::query::QueryProcessor;
 use anyhow::{Result, anyhow};
@@ -32,8 +33,14 @@ impl std::fmt::Debug for AIAgent {
 }
 
 impl AIAgent {
-    pub async fn new(config: Config) -> Result<Self> {
+    pub async fn new(mut config: Config) -> Result<Self> {
         info!("Initializing AI Agent...");
+
+        // 🧠 INTELLIGENT HARDWARE CHECK 🧠
+        if config.local_model.enabled {
+             let system_ctx = model_inspector::inspect_system(&config.local_model.model_path);
+             config.local_model.is_small_model = system_ctx.is_constrained;
+        }
 
         // Get app data directory for database - Cross-platform
         let app_data = crate::utils::paths::get_air_data_dir()
@@ -263,6 +270,6 @@ impl AIAgent {
     }
 
     pub async fn build_enhanced_prompt(&self, base_prompt: &str) -> Result<String> {
-        self.memory_manager.build_enhanced_prompt(base_prompt, &self.prompt_cache).await
+        self.memory_manager.build_enhanced_prompt(base_prompt, &self.prompt_cache, &self.config).await
     }
 }

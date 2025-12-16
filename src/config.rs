@@ -21,7 +21,13 @@ pub struct LocalModelConfig {
     pub device: String,
     #[serde(default = "default_true")]
     pub enabled: bool,
+
+    // NEW: Runtime detected flag (not usually set in config.toml)
+    #[serde(default = "default_false")]
+    pub is_small_model: bool,
 }
+
+fn default_false() -> bool { false }
 
 fn default_device() -> String {
     "cuda".to_string()
@@ -38,6 +44,7 @@ impl Default for LocalModelConfig {
             threads: 4,
             device: "cuda".to_string(),
             enabled: true,
+            is_small_model: false,
         }
     }
 }
