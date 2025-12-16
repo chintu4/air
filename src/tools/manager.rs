@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool, KnowledgeTool};
+use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool, KnowledgeTool, SystemTool};
 use anyhow::Result;
 use std::sync::Arc;
 use tracing::{info, debug};
@@ -13,6 +13,7 @@ pub struct ToolManager {
     screenshot: Arc<dyn Tool>,
     voice: Arc<dyn Tool>,
     knowledge: Arc<dyn Tool>,
+    system: Arc<dyn Tool>,
 }
 
 impl ToolManager {
@@ -36,11 +37,15 @@ impl ToolManager {
                 // I'll stick to unwrap() but I'll ensure KnowledgeTool::new() catches everything.
                 panic!("KnowledgeTool::new() should not fail")
             })),
+            system: Arc::new(SystemTool::new()),
         }
     }
     
-    // Deprecated: Using LLM for tool selection instead
-    pub fn detect_tool_intent(&self, _query: &str) -> Option<(String, String, serde_json::Value)> {
+    pub fn detect_tool_intent(&self, query: &str) -> Option<(String, String, serde_json::Value)> {
+        let query_lower = query.to_lowercase();
+        if query_lower.contains("time") || query_lower.contains("date") || query_lower.contains("clock") {
+             return Some(("system".to_string(), "get_system_time".to_string(), serde_json::json!({})));
+        }
         None
     }
     
@@ -58,6 +63,7 @@ impl ToolManager {
             "screenshot" => &self.screenshot,
             "voice" => &self.voice,
             "knowledge" => &self.knowledge,
+            "system" => &self.system,
             _ => return Err(anyhow::anyhow!("Unknown tool: {}", tool_name)),
         };
         

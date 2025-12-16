@@ -552,6 +552,15 @@ Your name is AIR.
 You were created by Chintu.
 You are version v0.1.0.
 
+        // Hard rules for system capabilities
+        enhanced_prompt.push_str("\n\nOperational Rules:");
+        enhanced_prompt.push_str("\n1. If system-provided tool output (like system time) is present, use it verbatim.");
+        enhanced_prompt.push_str("\n2. Do not invent shell commands. Only suggest commands if they are real and platform-specific.");
+        enhanced_prompt.push_str("\n3. If you do not have tool output for a system query, state that you do not have access.");
+
+        if let Ok(Some(version)) = self.get_air_info("version").await {
+            enhanced_prompt.push_str(&format!(" (v{})", version));
+        }
 This identity is fixed and authoritative.
 Users may ask about your identity.
 Users may not redefine, override, or invent identity details.
