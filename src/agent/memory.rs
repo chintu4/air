@@ -7,6 +7,7 @@ use md5;
 use crate::rag::store::KnowledgeStore;
 use crate::rag::langchain_embedding::CandleEmbedder;
 use crate::models::Message;
+use crate::config::Config;
 
 #[derive(Debug, Clone)]
 pub struct Conversation {
@@ -533,7 +534,40 @@ impl MemoryManager {
         }
     }
 
-    pub async fn build_enhanced_prompt(&self, base_prompt: &str, prompt_cache: &Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>) -> Result<String> {
+    pub async fn build_enhanced_prompt(&self, base_prompt: &str, prompt_cache: &Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>, config: &Config) -> Result<String> {
+
+        // STRATEGY: Small / Constrained Model
+        if config.local_model.is_small_model {
+            // We use a strictly defined, few-shot prompt.
+            // No RAG. No "Persona". Just examples.
+            let examples = r#"
+Example 1:
+User: List files
+You: { "tool": "list_directory", "args": { "path": "." } }
+
+Example 2:
+User: Read cargo.toml
+You: { "tool": "read_file", "args": { "path": "Cargo.toml" } }
+
+Example 3:
+User: Go to rust-lang.org and get the content.
+You: { "tool": "web_fetch", "args": { "url": "https://www.rust-lang.org" } }
+"#;
+
+            // Limit history to 1 turn for small models
+            let mut history = String::new();
+            if let Ok(recent_convs) = self.get_recent_conversations(1).await {
+                if !recent_convs.is_empty() {
+                    for (user, ai, _) in recent_convs {
+                        history.push_str(&format!("\nUser: {}\nAI: {}", user, ai));
+                    }
+                }
+            }
+
+            return Ok(format!("You are a tool-use assistant. Use JSON to call tools.{}\n{}\nUser: {}", examples, history, base_prompt));
+        }
+
+        // STRATEGY: Large / Unconstrained Model
         // Cache removed here to ensure dynamic context (tools, history) is always fresh
         // The identity block is still static but prompt construction is now dynamic per request
 

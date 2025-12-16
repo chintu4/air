@@ -199,7 +199,7 @@ impl QueryProcessor {
         info!("🔄 Processing query with smart fallback strategy");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())), config).await?;
 
         // Build structured prompt for local models (Prefix Caching)
         let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
@@ -282,7 +282,7 @@ impl QueryProcessor {
         info!("🏠 Using local model only");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())), config).await?;
 
         // Build structured prompt for local models (Prefix Caching)
         let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
@@ -309,7 +309,7 @@ impl QueryProcessor {
         prompt: &str,
         cloud_providers: &[Arc<dyn ModelProvider>],
         memory_manager: &MemoryManager,
-        _config: &Config,
+        config: &Config,
     ) -> Result<ModelResponse> {
         if cloud_providers.is_empty() {
             return Err(anyhow!("No cloud providers available"));
@@ -318,7 +318,7 @@ impl QueryProcessor {
         info!("🌤️  Using cloud models only");
 
         // Build enhanced prompt with context
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())), config).await?;
 
         // Build structured prompt for local models (Prefix Caching) - Optional for cloud
         let structured_messages = memory_manager.build_structured_prompt(prompt).await.ok();
@@ -355,7 +355,7 @@ impl QueryProcessor {
         info!("🏠 Using local model in pure mode (no templates)");
 
         // Build enhanced prompt with context (minimal for pure mode)
-        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))).await?;
+        let enhanced_prompt = memory_manager.build_enhanced_prompt(prompt, &Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())), config).await?;
         info!("📝 Enhanced prompt length: {} characters", enhanced_prompt.len());
 
         let context = QueryContext {
