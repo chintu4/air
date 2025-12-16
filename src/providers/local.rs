@@ -2,12 +2,14 @@ use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use std::io::{self, Write};
 use crate::models::{ModelProvider, ModelResponse, QueryContext};
 use crate::config::LocalModelConfig;
 use mistralrs::{
     GgufModelBuilder, Model,
-    ChatCompletionResponse, TextMessageRole,
-    TextMessages, Device, PagedAttentionMetaBuilder
+    TextMessageRole,
+    TextMessages, Device, PagedAttentionMetaBuilder,
+    RequestBuilder, Response, ChatCompletionChunkResponse, ChunkChoice, Delta
 };
 
 struct LocalState {
@@ -101,7 +103,7 @@ impl ModelProvider for LocalProvider {
         self.ensure_loaded().await?;
 
         let state = self.state.lock().await;
-        let model = state.model.as_ref().unwrap().clone();
+        let model = state.model.as_ref().unwrap();
 
         let start_time = std::time::Instant::now();
 
@@ -109,20 +111,41 @@ impl ModelProvider for LocalProvider {
         let messages = TextMessages::new()
             .add_message(TextMessageRole::User, context.prompt.clone());
 
-        // Send request to the model
-        // According to recent error, this returns ChatCompletionResponse directly
-        let response: ChatCompletionResponse = model.send_chat_request(messages).await?;
+        let request = RequestBuilder::from(messages)
+            .set_sampler_max_len(context.max_tokens as usize)
+            .set_sampler_temperature(context.temperature as f64)
+            .set_sampler_topp(0.9)
+            .set_sampler_topk(40);
 
-        let content = response.choices.first()
-            .map(|c| c.message.content.clone().unwrap_or_default())
-            .unwrap_or_default();
+        let mut stream = model.stream_chat_request(request).await?;
+        let mut content = String::new();
+        let mut tokens_used = 0;
 
-        let tokens_used = response.usage.total_tokens as usize;
+        while let Some(chunk) = stream.next().await {
+            if let Response::Chunk(ChatCompletionChunkResponse { choices, .. }) = chunk {
+                if let Some(ChunkChoice { delta: Delta { content: Some(c), .. }, .. }) = choices.first() {
+                    print!("{}", c);
+                    io::stdout().flush().ok();
+                    content.push_str(c);
+                    tokens_used += 1;
+                }
+            } else if let Response::ModelError(msg, _) = chunk {
+                return Err(anyhow!("Model error: {}", msg));
+            } else if let Response::ValidationError(msg) = chunk {
+                return Err(anyhow!("Validation error: {}", msg));
+            } else if let Response::InternalError(e) = chunk {
+                 return Err(anyhow!("Internal error: {}", e));
+            }
+        }
+
+        if content.is_empty() {
+            return Err(anyhow!("Local model produced no tokens"));
+        }
 
         Ok(ModelResponse {
             content,
             model_used: "mistralrs-gguf".to_string(),
-            tokens_used: tokens_used.try_into().unwrap_or(0),
+            tokens_used,
             response_time_ms: start_time.elapsed().as_millis() as u64,
             confidence_score: None,
         })
