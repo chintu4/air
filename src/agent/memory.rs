@@ -551,6 +551,12 @@ impl MemoryManager {
         }
         enhanced_prompt.push_str("\n\nIdentity: You are 'air', an AI assistant.");
 
+        // Hard rules for system capabilities
+        enhanced_prompt.push_str("\n\nOperational Rules:");
+        enhanced_prompt.push_str("\n1. If system-provided tool output (like system time) is present, use it verbatim.");
+        enhanced_prompt.push_str("\n2. Do not invent shell commands. Only suggest commands if they are real and platform-specific.");
+        enhanced_prompt.push_str("\n3. If you do not have tool output for a system query, state that you do not have access.");
+
         if let Ok(Some(version)) = self.get_air_info("version").await {
             enhanced_prompt.push_str(&format!(" (v{})", version));
         }
