@@ -7,7 +7,7 @@ use crate::config::LocalModelConfig;
 use mistralrs::{
     GgufModelBuilder, Model,
     ChatCompletionResponse, TextMessageRole,
-    TextMessages,
+    TextMessages, Device, PagedAttentionMetaBuilder
 };
 
 struct LocalState {
@@ -49,11 +49,28 @@ impl LocalProvider {
             .to_str()
             .ok_or_else(|| anyhow!("Invalid filename string"))?;
 
-        let builder = GgufModelBuilder::new(
+        let mut builder = GgufModelBuilder::new(
              parent.to_string_lossy(),
              vec![filename.to_string()]
-        );
+        )
+        .with_logging();
 
+        builder = builder.with_paged_attn(|| {
+            PagedAttentionMetaBuilder::default().build()
+        })?;
+
+        match self.config.device.to_lowercase().as_str() {
+            "cpu" => {
+                builder = builder.with_force_cpu();
+            },
+            "gpu" | "cuda" => {
+                let device = Device::new_cuda(0)?;
+                builder = builder.with_device(device);
+            },
+            _ => {
+                // "auto" or anything else: Let mistralrs decide
+            }
+        }
  
         let model = builder.build().await?;
 
