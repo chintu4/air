@@ -62,7 +62,11 @@ impl VoiceTool {
                     
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Speech generated and saved to: {}", absolute_path),
+                    result: serde_json::json!({
+                        "message": "Speech generated successfully",
+                        "filepath": absolute_path,
+                        "timestamp": Utc::now().to_rfc3339()
+                    }),
                     metadata: Some(serde_json::json!({
                         "filepath": absolute_path,
                         "text": text,
@@ -73,7 +77,7 @@ impl VoiceTool {
             }
             Err(e) => Ok(ToolResult {
                 success: false,
-                result: format!("Failed to generate speech: {}", e),
+                result: serde_json::json!(format!("Failed to generate speech: {}", e)),
                 metadata: Some(serde_json::json!({
                     "error": e.to_string(),
                     "text": text
@@ -211,7 +215,11 @@ impl VoiceTool {
                 // external services or complex libraries
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Audio recorded to: {}. Note: Speech-to-text transcription requires external services like Google Speech API, Azure Speech, or local models.", filepath.to_string_lossy()),
+                    result: serde_json::json!({
+                        "message": "Audio recorded successfully",
+                        "filepath": filepath.to_string_lossy(),
+                        "note": "Transcription requires additional setup"
+                    }),
                     metadata: Some(serde_json::json!({
                         "audio_file": filepath.to_string_lossy(),
                         "duration": duration,
@@ -221,7 +229,7 @@ impl VoiceTool {
             }
             Err(e) => Ok(ToolResult {
                 success: false,
-                result: format!("Failed to record audio: {}", e),
+                result: serde_json::json!(format!("Failed to record audio: {}", e)),
                 metadata: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
@@ -233,7 +241,7 @@ impl VoiceTool {
         if !Path::new(file_path).exists() {
             return Ok(ToolResult {
                 success: false,
-                result: format!("Audio file not found: {}", file_path),
+                result: serde_json::json!(format!("Audio file not found: {}", file_path)),
                 metadata: None,
             });
         }
@@ -241,7 +249,10 @@ impl VoiceTool {
         // Placeholder for speech-to-text processing
         Ok(ToolResult {
             success: true,
-            result: format!("Audio file found: {}. Speech-to-text transcription requires external services.", file_path),
+            result: serde_json::json!({
+                "message": "Audio file found, but transcription is not configured",
+                "audio_file": file_path
+            }),
             metadata: Some(serde_json::json!({
                 "audio_file": file_path,
                 "note": "Transcription requires additional setup with speech recognition services"
@@ -328,7 +339,9 @@ impl VoiceTool {
         
         Ok(ToolResult {
             success: true,
-            result: format!("Available voices: {}", voices.join(", ")),
+            result: serde_json::json!({
+                "voices": voices
+            }),
             metadata: Some(serde_json::json!({
                 "voices": voices
             })),

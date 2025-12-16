@@ -98,13 +98,16 @@ impl Tool for FileSystemTool {
                         
                         Ok(ToolResult {
                             success: true,
-                            result: content,
+                            result: json!({
+                                "content": content,
+                                "metadata": metadata
+                            }),
                             metadata: Some(metadata),
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to read file: {}", e),
+                        result: json!(format!("Failed to read file: {}", e)),
                         metadata: None,
                     })
                 }
@@ -119,7 +122,7 @@ impl Tool for FileSystemTool {
                 if !self.ask_confirmation("WRITE to file", path) {
                      return Ok(ToolResult {
                         success: false,
-                        result: "Operation cancelled by user.".to_string(),
+                        result: json!("Operation cancelled by user."),
                         metadata: None,
                     });
                 }
@@ -140,13 +143,13 @@ impl Tool for FileSystemTool {
                         
                         Ok(ToolResult {
                             success: true,
-                            result: format!("Successfully wrote {} bytes to {}", content.len(), path),
+                            result: json!(format!("Successfully wrote {} bytes to {}", content.len(), path)),
                             metadata: Some(metadata),
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to write file: {}", e),
+                        result: json!(format!("Failed to write file: {}", e)),
                         metadata: None,
                     })
                 }
@@ -174,15 +177,7 @@ impl Tool for FileSystemTool {
                             }
                         }
                         
-                        let result = format!(
-                            "Directories ({}): {}\nFiles ({}): {}",
-                            dirs.len(),
-                            dirs.join(", "),
-                            files.len(),
-                            files.join(", ")
-                        );
-                        
-                        let metadata = json!({
+                        let result_json = json!({
                             "path": path,
                             "directories": dirs,
                             "files": files,
@@ -191,13 +186,13 @@ impl Tool for FileSystemTool {
                         
                         Ok(ToolResult {
                             success: true,
-                            result,
-                            metadata: Some(metadata),
+                            result: result_json.clone(),
+                            metadata: Some(result_json),
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to list directory: {}", e),
+                        result: json!(format!("Failed to list directory: {}", e)),
                         metadata: None,
                     })
                 }
@@ -212,7 +207,7 @@ impl Tool for FileSystemTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: if exists { "File exists" } else { "File does not exist" }.to_string(),
+                    result: json!({"exists": exists, "path": path}),
                     metadata: Some(json!({"path": path, "exists": exists})),
                 })
             }
@@ -238,16 +233,13 @@ impl Tool for FileSystemTool {
                         
                         Ok(ToolResult {
                             success: true,
-                            result: format!("File info for {}: {} bytes, {}", 
-                                path, metadata.len(),
-                                if metadata.is_file() { "file" } else { "directory" }
-                            ),
+                            result: info.clone(),
                             metadata: Some(info),
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to get file info: {}", e),
+                        result: json!(format!("Failed to get file info: {}", e)),
                         metadata: None,
                     })
                 }
@@ -260,7 +252,7 @@ impl Tool for FileSystemTool {
                 if !self.ask_confirmation("CREATE directory", path) {
                      return Ok(ToolResult {
                         success: false,
-                        result: "Operation cancelled by user.".to_string(),
+                        result: json!("Operation cancelled by user."),
                         metadata: None,
                     });
                 }
@@ -270,12 +262,12 @@ impl Tool for FileSystemTool {
                 match fs::create_dir_all(&full_path) {
                     Ok(_) => Ok(ToolResult {
                         success: true,
-                        result: format!("Created directory: {}", path),
+                        result: json!(format!("Created directory: {}", path)),
                         metadata: Some(json!({"path": path})),
                     }),
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to create directory: {}", e),
+                        result: json!(format!("Failed to create directory: {}", e)),
                         metadata: None,
                     })
                 }

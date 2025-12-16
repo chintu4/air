@@ -167,7 +167,11 @@ impl Tool for PlannerTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Created task '{}' with ID: {}", title, task_id),
+                    result: json!({
+                        "task_id": task_id,
+                        "title": title,
+                        "status": "created"
+                    }),
                     metadata: Some(json!({
                         "task_id": task_id,
                         "title": title
@@ -181,19 +185,12 @@ impl Tool for PlannerTool {
                 
                 let subtasks = self.break_down_complex_task(description);
                 
-                let result = format!(
-                    "Task breakdown for: '{}'\n\nSubtasks:\n{}",
-                    description,
-                    subtasks.iter()
-                        .enumerate()
-                        .map(|(i, task)| format!("{}. {}", i + 1, task))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                );
-                
                 Ok(ToolResult {
                     success: true,
-                    result,
+                    result: json!({
+                        "original_task": description,
+                        "subtasks": subtasks
+                    }),
                     metadata: Some(json!({
                         "original_task": description,
                         "subtasks": subtasks,
@@ -236,34 +233,9 @@ impl Tool for PlannerTool {
                     })
                     .collect();
                 
-                let mut result = format!("Found {} tasks:\n\n", filtered_tasks.len());
-                
-                for (i, task) in filtered_tasks.iter().enumerate() {
-                    result.push_str(&format!(
-                        "{}. {} [{}] [{}]\n   {}\n   Created: {}\n\n",
-                        i + 1,
-                        task.title,
-                        match task.priority {
-                            Priority::Low => "LOW",
-                            Priority::Medium => "MED", 
-                            Priority::High => "HIGH",
-                            Priority::Critical => "CRIT",
-                        },
-                        match task.status {
-                            TaskStatus::NotStarted => "TODO",
-                            TaskStatus::InProgress => "DOING",
-                            TaskStatus::Completed => "DONE",
-                            TaskStatus::Blocked => "BLOCKED",
-                            TaskStatus::Cancelled => "CANCELLED",
-                        },
-                        task.description,
-                        task.created_at.format("%m/%d %H:%M")
-                    ));
-                }
-                
                 Ok(ToolResult {
                     success: true,
-                    result,
+                    result: json!(filtered_tasks),
                     metadata: Some(json!({
                         "total_tasks": tasks.len(),
                         "filtered_tasks": filtered_tasks.len()
@@ -299,26 +271,28 @@ impl Tool for PlannerTool {
                     }
                 });
                 
-                let result = if let Some(next_task) = pending_tasks.first() {
-                    format!(
-                        "Suggested next action:\n\n📋 {}\n\n📝 {}\n\n⭐ Priority: {:?}\n📅 Created: {}",
-                        next_task.title,
-                        next_task.description,
-                        next_task.priority,
-                        next_task.created_at.format("%m/%d %H:%M")
-                    )
+                if let Some(next_task) = pending_tasks.first() {
+                    Ok(ToolResult {
+                        success: true,
+                        result: json!(next_task),
+                        metadata: Some(json!({
+                            "pending_tasks_count": pending_tasks.len(),
+                            "next_task_id": next_task.id
+                        })),
+                    })
                 } else {
-                    "🎉 No pending tasks! All tasks are completed or cancelled.".to_string()
-                };
-                
-                Ok(ToolResult {
-                    success: true,
-                    result,
-                    metadata: Some(json!({
-                        "pending_tasks_count": pending_tasks.len(),
-                        "next_task_id": pending_tasks.first().map(|t| &t.id)
-                    })),
-                })
+                    Ok(ToolResult {
+                        success: true,
+                        result: json!({
+                            "message": "No pending tasks found",
+                            "pending_tasks_count": 0
+                        }),
+                        metadata: Some(json!({
+                            "pending_tasks_count": 0,
+                            "next_task_id": null
+                        })),
+                    })
+                }
             }
             
             "update_task" => {
@@ -347,7 +321,11 @@ impl Tool for PlannerTool {
                     
                     Ok(ToolResult {
                         success: true,
-                        result: format!("Updated task '{}': {}", task.title, updated_fields.join(", ")),
+                        result: json!({
+                            "task_id": task_id,
+                            "updated_fields": updated_fields,
+                            "task": task
+                        }),
                         metadata: Some(json!({
                             "task_id": task_id,
                             "updated_fields": updated_fields
@@ -356,7 +334,7 @@ impl Tool for PlannerTool {
                 } else {
                     Ok(ToolResult {
                         success: false,
-                        result: format!("Task not found: {}", task_id),
+                        result: json!(format!("Task not found: {}", task_id)),
                         metadata: None,
                     })
                 }

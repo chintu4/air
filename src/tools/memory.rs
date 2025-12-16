@@ -141,30 +141,12 @@ impl Tool for MemoryTool {
                 let recent: Vec<_> = conversations.iter()
                     .rev()
                     .take(limit)
+                    .cloned()
                     .collect();
-                
-                let mut result = String::new();
-                for (i, entry) in recent.iter().enumerate() {
-                    result.push_str(&format!(
-                        "{}. [{}] User: {}\n   AI: {}\n\n",
-                        i + 1,
-                        entry.timestamp.format("%H:%M:%S"),
-                        entry.user_input,
-                        if entry.ai_response.len() > 100 {
-                            format!("{}...", &entry.ai_response[..100])
-                        } else {
-                            entry.ai_response.clone()
-                        }
-                    ));
-                }
-                
-                if result.is_empty() {
-                    result = "No conversation history found.".to_string();
-                }
                 
                 Ok(ToolResult {
                     success: true,
-                    result,
+                    result: json!(recent),
                     metadata: Some(json!({
                         "total_entries": conversations.len(),
                         "returned_entries": recent.len()
@@ -184,30 +166,12 @@ impl Tool for MemoryTool {
                         entry.user_input.to_lowercase().contains(&query_lower) ||
                         entry.ai_response.to_lowercase().contains(&query_lower)
                     })
+                    .cloned()
                     .collect();
-                
-                let mut result = String::new();
-                for (i, entry) in matches.iter().enumerate() {
-                    result.push_str(&format!(
-                        "{}. [{}] User: {}\n   AI: {}\n\n",
-                        i + 1,
-                        entry.timestamp.format("%m/%d %H:%M"),
-                        entry.user_input,
-                        if entry.ai_response.len() > 150 {
-                            format!("{}...", &entry.ai_response[..150])
-                        } else {
-                            entry.ai_response.clone()
-                        }
-                    ));
-                }
-                
-                if result.is_empty() {
-                    result = format!("No conversations found matching '{}'", query);
-                }
                 
                 Ok(ToolResult {
                     success: true,
-                    result,
+                    result: json!(matches),
                     metadata: Some(json!({
                         "query": query,
                         "matches_found": matches.len()
@@ -218,23 +182,9 @@ impl Tool for MemoryTool {
             "get_summary" => {
                 let summary = self.get_conversation_summary();
                 
-                let result = format!(
-                    "Conversation Summary:\n\
-                     Total exchanges: {}\n\
-                     Session started: {}\n\
-                     Last activity: {}\n\
-                     Tools used: {:?}\n\
-                     Topics discussed: {}",
-                    summary.total_exchanges,
-                    summary.start_time.format("%Y-%m-%d %H:%M:%S"),
-                    summary.last_activity.format("%Y-%m-%d %H:%M:%S"),
-                    summary.tools_used,
-                    summary.topics_discussed.join(", ")
-                );
-                
                 Ok(ToolResult {
                     success: true,
-                    result,
+                    result: json!(summary),
                     metadata: Some(json!(summary)),
                 })
             }
@@ -249,11 +199,12 @@ impl Tool for MemoryTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Stored data with key: {}", key),
-                    metadata: Some(json!({
+                    result: json!({
+                        "status": "stored",
                         "key": key,
                         "value": value
-                    })),
+                    }),
+                    metadata: None,
                 })
             }
             
@@ -266,16 +217,16 @@ impl Tool for MemoryTool {
                 if let Some(value) = session_data.get(key) {
                     Ok(ToolResult {
                         success: true,
-                        result: format!("Retrieved data for key '{}': {}", key, value),
-                        metadata: Some(json!({
+                        result: json!({
                             "key": key,
                             "value": value
-                        })),
+                        }),
+                        metadata: None,
                     })
                 } else {
                     Ok(ToolResult {
                         success: false,
-                        result: format!("No data found for key: {}", key),
+                        result: json!(format!("No data found for key: {}", key)),
                         metadata: None,
                     })
                 }
@@ -287,7 +238,7 @@ impl Tool for MemoryTool {
                 if !confirm {
                     return Ok(ToolResult {
                         success: false,
-                        result: "Please confirm history clearing by setting 'confirm': true".to_string(),
+                        result: json!("Please confirm history clearing by setting 'confirm': true"),
                         metadata: None,
                     });
                 }
@@ -301,7 +252,10 @@ impl Tool for MemoryTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Cleared {} conversation entries and all session data", cleared_count),
+                    result: json!({
+                        "status": "cleared",
+                        "cleared_conversations": cleared_count
+                    }),
                     metadata: Some(json!({
                         "cleared_conversations": cleared_count
                     })),

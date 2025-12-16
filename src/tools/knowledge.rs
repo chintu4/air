@@ -82,7 +82,7 @@ impl Tool for KnowledgeTool {
         if self.store.is_none() {
             return Ok(ToolResult {
                 success: false,
-                result: "Knowledge system is currently unavailable (initialization failed).".to_string(),
+                result: json!("Knowledge system is currently unavailable (initialization failed)."),
                 metadata: None,
             });
         }
@@ -98,23 +98,23 @@ impl Tool for KnowledgeTool {
                 if results.is_empty() {
                     return Ok(ToolResult {
                         success: true,
-                        result: "No relevant information found in knowledge base.".to_string(),
-                        metadata: None,
+                        result: json!([]),
+                        metadata: Some(json!({"message": "No relevant information found"})),
                     });
                 }
 
-                let mut result_text = String::new();
+                let mut result_items = Vec::new();
                 for (doc, score) in results {
-                    let source = doc.metadata.get("filename").and_then(|v| v.as_str()).unwrap_or("unknown");
-                    result_text.push_str(&format!(
-                        "[Score: {:.2}] (Source: {})\n{}\n\n",
-                        score, source, doc.page_content
-                    ));
+                    result_items.push(json!({
+                        "content": doc.page_content,
+                        "metadata": doc.metadata,
+                        "score": score
+                    }));
                 }
 
                 Ok(ToolResult {
                     success: true,
-                    result: result_text,
+                    result: json!(result_items),
                     metadata: None,
                 })
             }
@@ -127,12 +127,16 @@ impl Tool for KnowledgeTool {
                     match self.add_file(p).await {
                         Ok(msg) => Ok(ToolResult {
                             success: true,
-                            result: msg,
+                            result: json!({
+                                "status": "success",
+                                "message": msg,
+                                "file": p
+                            }),
                             metadata: None,
                         }),
                         Err(e) => Ok(ToolResult {
                             success: false,
-                            result: format!("Failed to index file: {}", e),
+                            result: json!(format!("Failed to index file: {}", e)),
                             metadata: None,
                         }),
                     }
@@ -140,7 +144,10 @@ impl Tool for KnowledgeTool {
                     store.add_text(c, json!({"type": "manual_entry"})).await?;
                     Ok(ToolResult {
                         success: true,
-                        result: "Added text content to knowledge base.".to_string(),
+                        result: json!({
+                            "status": "success",
+                            "message": "Added text content to knowledge base"
+                        }),
                         metadata: None,
                     })
                 } else {

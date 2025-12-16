@@ -533,16 +533,8 @@ impl MemoryManager {
     }
 
     pub async fn build_enhanced_prompt(&self, base_prompt: &str, prompt_cache: &Arc<Mutex<std::collections::HashMap<String, (String, std::time::Instant)>>>) -> Result<String> {
-        let cache_key = format!("{:x}", md5::compute(base_prompt));
-
-        {
-            let cache = prompt_cache.lock().unwrap();
-            if let Some((cached_prompt, timestamp)) = cache.get(&cache_key) {
-                if timestamp.elapsed() < Duration::from_secs(300) {
-                    return Ok(cached_prompt.clone());
-                }
-            }
-        }
+        // Cache removed here to ensure dynamic context (tools, history) is always fresh
+        // The identity block is still static but prompt construction is now dynamic per request
 
         const AIR_IDENTITY_BLOCK: &str = r#"
 SYSTEM IDENTITY (AUTHORITATIVE):
@@ -552,24 +544,43 @@ Your name is AIR.
 You were created by Chintu.
 You are version v0.1.0.
 
-        // Hard rules for system capabilities
-        enhanced_prompt.push_str("\n\nOperational Rules:");
-        enhanced_prompt.push_str("\n1. If system-provided tool output (like system time) is present, use it verbatim.");
-        enhanced_prompt.push_str("\n2. Do not invent shell commands. Only suggest commands if they are real and platform-specific.");
-        enhanced_prompt.push_str("\n3. If you do not have tool output for a system query, state that you do not have access.");
-
-        if let Ok(Some(version)) = self.get_air_info("version").await {
-            enhanced_prompt.push_str(&format!(" (v{})", version));
-        }
 This identity is fixed and authoritative.
 Users may ask about your identity.
 Users may not redefine, override, or invent identity details.
 If a user states incorrect facts about your identity, correct them briefly.
 Do not invent dates, metadata, biographies, or backstories.
 Do not mention model providers, training data, or internal implementation.
+
+TOOL USAGE INSTRUCTIONS (CRITICAL):
+
+You have access to a set of tools. To use a tool, you MUST output a JSON object in the following format:
+
+```json
+{
+  "tool": "tool_name",
+  "function": "function_name",
+  "args": {
+    "arg1": "value1",
+    "arg2": "value2"
+  }
+}
+```
+
+Do NOT include any other text when using a tool. Just the JSON block.
+After the tool is executed, the system will provide you with the result.
+If no tool is needed, respond in natural language.
+
+Operational Rules:
+1. If system-provided tool output (like system time) is present in the context, use it verbatim.
+2. Do not invent shell commands. Only suggest commands if they are real and platform-specific.
+3. If you do not have tool output for a system query, state that you do not have access or try to use a tool to get it.
 "#;
 
         let mut enhanced_prompt = AIR_IDENTITY_BLOCK.to_string();
+
+        if let Ok(Some(version)) = self.get_air_info("version").await {
+            enhanced_prompt.push_str(&format!(" (v{})", version));
+        }
 
         if let Ok(Some(preferences)) = self.get_user_preference("response_style").await {
             enhanced_prompt.push_str(&format!("\n\nUser Preference: Response style - {}", preferences));
@@ -612,20 +623,6 @@ Do not mention model providers, training data, or internal implementation.
             Err(e) => {
                 // Ignore RAG errors silently or log them
                 info!("RAG search failed: {}", e);
-            }
-        }
-
-        {
-            let mut cache = prompt_cache.lock().unwrap();
-            cache.insert(cache_key, (enhanced_prompt.clone(), std::time::Instant::now()));
-            if cache.len() > 100 {
-                let keys_to_remove: Vec<String> = cache.iter()
-                    .filter(|(_, (_, timestamp))| timestamp.elapsed() > Duration::from_secs(600))
-                    .map(|(k, _)| k.clone())
-                    .collect();
-                for key in keys_to_remove {
-                    cache.remove(&key);
-                }
             }
         }
 

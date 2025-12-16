@@ -24,7 +24,7 @@ pub struct ToolCall {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResult {
     pub success: bool,
-    pub result: String,
+    pub result: serde_json::Value,
     pub metadata: Option<serde_json::Value>,
 }
 
