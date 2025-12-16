@@ -97,7 +97,7 @@ impl Tool for WebTool {
                 if !self.is_valid_url(url) {
                     return Ok(ToolResult {
                         success: false,
-                        result: format!("Invalid URL format: {}. Must start with http:// or https://", url),
+                        result: json!(format!("Invalid URL format: {}. Must start with http:// or https://", url)),
                         metadata: None,
                     });
                 }
@@ -131,20 +131,25 @@ impl Tool for WebTool {
                                     
                                     Ok(ToolResult {
                                         success: true,
-                                        result: format!("Successfully fetched {}:\n\n{}", url, preview),
+                                        result: json!({
+                                            "url": url,
+                                            "content": text_content,
+                                            "status_code": status.as_u16(),
+                                            "truncated": text_content.len() > 10000
+                                        }),
                                         metadata: Some(metadata),
                                     })
                                 }
                                 Err(e) => Ok(ToolResult {
                                     success: false,
-                                    result: format!("Failed to read response body: {}", e),
+                                    result: json!(format!("Failed to read response body: {}", e)),
                                     metadata: None,
                                 })
                             }
                         } else {
                             Ok(ToolResult {
                                 success: false,
-                                result: format!("HTTP Error {}: Failed to fetch {}", status, url),
+                                result: json!(format!("HTTP Error {}: Failed to fetch {}", status, url)),
                                 metadata: Some(json!({
                                     "url": url,
                                     "status_code": status.as_u16(),
@@ -155,7 +160,7 @@ impl Tool for WebTool {
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Network error fetching {}: {}", url, e),
+                        result: json!(format!("Network error fetching {}: {}", url, e)),
                         metadata: None,
                     })
                 }
@@ -168,7 +173,7 @@ impl Tool for WebTool {
                 if !self.is_valid_url(url) {
                     return Ok(ToolResult {
                         success: false,
-                        result: format!("Invalid URL format: {}", url),
+                        result: json!(format!("Invalid URL format: {}", url)),
                         metadata: None,
                     });
                 }
@@ -180,33 +185,29 @@ impl Tool for WebTool {
                         let status = response.status();
                         let headers = response.headers();
                         
-                        let result = format!(
-                            "Status for {}: {} {}\nServer: {}\nContent-Type: {}",
-                            url,
-                            status.as_u16(),
-                            status.canonical_reason().unwrap_or("Unknown"),
-                            headers.get("server")
-                                .and_then(|v| v.to_str().ok())
-                                .unwrap_or("Unknown"),
-                            headers.get("content-type")
-                                .and_then(|v| v.to_str().ok())
-                                .unwrap_or("Unknown")
-                        );
+                        let server = headers.get("server")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("Unknown");
+                        let content_type = headers.get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                            .unwrap_or("Unknown");
                         
                         Ok(ToolResult {
                             success: true,
-                            result,
-                            metadata: Some(json!({
+                            result: json!({
                                 "url": url,
                                 "status_code": status.as_u16(),
                                 "status_text": status.canonical_reason(),
+                                "server": server,
+                                "content_type": content_type,
                                 "is_success": status.is_success()
-                            })),
+                            }),
+                            metadata: None,
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to check status for {}: {}", url, e),
+                        result: json!(format!("Failed to check status for {}: {}", url, e)),
                         metadata: None,
                     })
                 }
@@ -219,7 +220,7 @@ impl Tool for WebTool {
                 if !self.is_valid_url(url) {
                     return Ok(ToolResult {
                         success: false,
-                        result: format!("Invalid URL format: {}", url),
+                        result: json!(format!("Invalid URL format: {}", url)),
                         metadata: None,
                     });
                 }
@@ -227,28 +228,29 @@ impl Tool for WebTool {
                 match self.client.head(url).send().await {
                     Ok(response) => {
                         let headers = response.headers();
-                        let mut header_list = Vec::new();
+                        let mut header_map = serde_json::Map::new();
                         
                         for (name, value) in headers.iter() {
                             if let Ok(value_str) = value.to_str() {
-                                header_list.push(format!("{}: {}", name, value_str));
+                                header_map.insert(name.to_string(), json!(value_str));
                             }
                         }
                         
-                        let result = format!("Headers for {}:\n{}", url, header_list.join("\n"));
-                        
                         Ok(ToolResult {
                             success: true,
-                            result,
+                            result: json!({
+                                "url": url,
+                                "headers": header_map
+                            }),
                             metadata: Some(json!({
                                 "url": url,
-                                "header_count": header_list.len()
+                                "header_count": headers.len()
                             })),
                         })
                     }
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Failed to get headers for {}: {}", url, e),
+                        result: json!(format!("Failed to get headers for {}: {}", url, e)),
                         metadata: None,
                     })
                 }

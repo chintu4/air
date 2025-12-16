@@ -57,7 +57,11 @@ impl ScreenshotTool {
                     
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Screenshot saved to: {}\n💡 Tip: Use 'analyze screenshot {}' to get AI description (costs ~$0.003)", absolute_path, filename),
+                    result: serde_json::json!({
+                        "filepath": absolute_path,
+                        "filename": filename,
+                        "timestamp": Utc::now().to_rfc3339()
+                    }),
                     metadata: Some(serde_json::json!({
                         "filepath": absolute_path,
                         "filename": filename,
@@ -68,7 +72,7 @@ impl ScreenshotTool {
             }
             Err(e) => Ok(ToolResult {
                 success: false,
-                result: format!("Failed to take screenshot: {}", e),
+                result: serde_json::json!(format!("Failed to take screenshot: {}", e)),
                 metadata: Some(serde_json::json!({
                     "error": e.to_string()
                 })),
@@ -190,7 +194,7 @@ impl ScreenshotTool {
         if !path.exists() {
             return Ok(ToolResult {
                 success: false,
-                result: format!("Screenshot not found: {}", filepath),
+                result: serde_json::json!(format!("Screenshot not found: {}", filepath)),
                 metadata: None,
             });
         }
@@ -205,7 +209,11 @@ impl ScreenshotTool {
         // The actual vision API call will be handled by the agent/cloud providers
         Ok(ToolResult {
             success: true,
-            result: format!("Screenshot ready for analysis: {}\n🔍 Analysis prompt: {}\n💰 Cost: ~$0.003 per analysis", filepath, analysis_prompt),
+            result: serde_json::json!({
+                "filepath": filepath,
+                "status": "ready_for_analysis",
+                "prompt": analysis_prompt
+            }),
             metadata: Some(serde_json::json!({
                 "filepath": filepath,
                 "base64_image": base64_image,
@@ -223,7 +231,10 @@ impl ScreenshotTool {
         if !screenshots_dir.exists() {
             return Ok(ToolResult {
                 success: true,
-                result: "No screenshots directory found.".to_string(),
+                result: serde_json::json!({
+                    "directory": self.output_dir,
+                    "files": []
+                }),
                 metadata: Some(serde_json::json!({
                     "directory": self.output_dir,
                     "files": []
@@ -255,15 +266,13 @@ impl ScreenshotTool {
                 .cmp(&a.get("modified").and_then(|v| v.as_u64()))
         });
         
-        let result = if files.is_empty() {
-            "No screenshots found.".to_string()
-        } else {
-            format!("Found {} screenshots in {}", files.len(), self.output_dir)
-        };
-        
         Ok(ToolResult {
             success: true,
-            result,
+            result: serde_json::json!({
+                "directory": self.output_dir,
+                "files": files,
+                "count": files.len()
+            }),
             metadata: Some(serde_json::json!({
                 "directory": self.output_dir,
                 "files": files

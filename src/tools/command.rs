@@ -120,7 +120,7 @@ impl CommandTool {
             if !self.request_permission(command)? {
                 return Ok(ToolResult {
                     success: false,
-                    result: "Command execution cancelled by user.".to_string(),
+                    result: serde_json::json!("Command execution cancelled by user."),
                     metadata: Some(serde_json::json!({
                         "cancelled": true,
                         "command": command
@@ -147,29 +147,24 @@ impl CommandTool {
                 let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 
-                let result = if !stdout.is_empty() {
-                    stdout.clone()
-                } else if !stderr.is_empty() {
-                    format!("Error: {}", stderr)
-                } else {
-                    "Command executed successfully (no output).".to_string()
-                };
+                let result_json = serde_json::json!({
+                    "stdout": stdout,
+                    "stderr": stderr,
+                    "exit_code": output.status.code()
+                });
                 
                 Ok(ToolResult {
                     success: output.status.success(),
-                    result: result.trim().to_string(),
+                    result: result_json,
                     metadata: Some(serde_json::json!({
-                        "exit_code": output.status.code(),
                         "command": command,
-                        "stdout": stdout,
-                        "stderr": stderr
                     })),
                 })
             }
             Err(e) => {
                 Ok(ToolResult {
                     success: false,
-                    result: format!("Failed to execute command: {}", e),
+                    result: serde_json::json!(format!("Failed to execute command: {}", e)),
                     metadata: Some(serde_json::json!({
                         "error": e.to_string(),
                         "command": command
@@ -217,7 +212,7 @@ impl Tool for CommandTool {
                 } else {
                     Ok(ToolResult {
                         success: false,
-                        result: format!("Command '{}' is not in the safe commands list. Use 'execute' function for explicit permission.", command),
+                        result: serde_json::json!(format!("Command '{}' is not in the safe commands list. Use 'execute' function for explicit permission.", command)),
                         metadata: Some(serde_json::json!({
                             "safe": false,
                             "command": command
@@ -229,10 +224,10 @@ impl Tool for CommandTool {
                 let safe_list: Vec<String> = self.safe_commands.iter().cloned().collect();
                 Ok(ToolResult {
                     success: true,
-                    result: format!("Safe commands: {}", safe_list.join(", ")),
-                    metadata: Some(serde_json::json!({
+                    result: serde_json::json!({
                         "safe_commands": safe_list
-                    })),
+                    }),
+                    metadata: None,
                 })
             }
             _ => Err(anyhow!("Unknown function: {}", function))

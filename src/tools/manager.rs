@@ -41,14 +41,31 @@ impl ToolManager {
         }
     }
     
-    pub fn detect_tool_intent(&self, query: &str) -> Option<(String, String, serde_json::Value)> {
-        let query_lower = query.to_lowercase();
-        if query_lower.contains("time") || query_lower.contains("date") || query_lower.contains("clock") {
-             return Some(("system".to_string(), "get_system_time".to_string(), serde_json::json!({})));
-        }
-        None
+    pub fn get_tool_definitions(&self) -> serde_json::Value {
+        let tools: Vec<&Arc<dyn Tool>> = vec![
+            &self.filesystem,
+            &self.calculator,
+            &self.memory,
+            &self.planner,
+            &self.web,
+            &self.command,
+            &self.screenshot,
+            &self.voice,
+            &self.knowledge,
+            &self.system,
+        ];
+
+        let definitions: Vec<serde_json::Value> = tools.iter().map(|tool| {
+            serde_json::json!({
+                "name": tool.name(),
+                "description": tool.description(),
+                "functions": tool.available_functions()
+            })
+        }).collect();
+
+        serde_json::json!(definitions)
     }
-    
+
     pub async fn execute_tool(&self, tool_name: &str, function: &str, args: serde_json::Value) -> Result<ToolResult> {
         info!("🔧 Executing tool: {} -> {}", tool_name, function);
         debug!("Tool arguments: {}", args);

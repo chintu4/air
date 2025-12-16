@@ -29,10 +29,17 @@ impl Tool for SystemTool {
     async fn execute(&self, function: &str, _args: Value) -> Result<ToolResult> {
         match function {
             "get_system_time" => {
-                let time = Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+                let now = Local::now();
+                let time_json = serde_json::json!({
+                    "iso": now.to_rfc3339(),
+                    "timestamp": now.timestamp(),
+                    "formatted": now.format("%Y-%m-%d %H:%M:%S %Z").to_string(),
+                    "timezone": now.format("%Z").to_string()
+                });
+
                 Ok(ToolResult {
                     success: true,
-                    result: time,
+                    result: time_json,
                     metadata: None,
                 })
             }

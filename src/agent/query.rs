@@ -40,7 +40,7 @@ impl QueryProcessor {
         Self
     }
 
-    /// Enhanced query with tool detection and execution
+    /// Enhanced query with ReAct loop
     pub async fn query_with_tools(
         &self,
         prompt: &str,
@@ -50,56 +50,141 @@ impl QueryProcessor {
         memory_manager: &MemoryManager,
         config: &Config,
     ) -> Result<ModelResponse> {
-        info!("🔧 Processing query with tool detection");
+        info!("🔄 Starting ReAct loop");
 
-        // First, check if this query should use tools
-        if let Some((tool_name, function, args)) = tool_manager.detect_tool_intent(prompt) {
-            info!("🎯 Detected tool usage: {} -> {}", tool_name, function);
+        let mut current_prompt = prompt.to_string();
+        let max_steps = 5;
+        let mut steps = 0;
+        let mut tool_history = String::new();
 
-            match tool_manager.execute_tool(&tool_name, &function, args).await {
-                Ok(tool_result) => {
-                    if tool_result.success {
+        // Add tool definitions to the context
+        let tool_definitions = tool_manager.get_tool_definitions();
+        let tool_context = format!("\nAvailable Tools:\n{}\n", serde_json::to_string_pretty(&tool_definitions)?);
+
+        // We'll prepend this to the prompt internally in `query_with_fallback` via `memory_manager.build_enhanced_prompt`
+        // But since we want to dynamically inject it, we might need a way to pass it down.
+        // For now, let's append it to the prompt if it's the first step.
+        // Actually, MemoryManager constructs the system prompt. We should probably update MemoryManager to accept tool defs,
+        // but for now, let's append it to the user prompt to ensure the model sees it.
+        current_prompt = format!("{}\n\n{}", tool_context, current_prompt);
+
+        while steps < max_steps {
+            steps += 1;
+            info!("📍 ReAct Step {}/{}", steps, max_steps);
+
+            // 1. Query the model
+            let response = self.query_with_fallback(
+                &current_prompt,
+                local_provider,
+                cloud_providers,
+                memory_manager,
+                config
+            ).await?;
+
+            // 2. Check for tool usage (JSON block)
+            if let Some(tool_call) = self.extract_json_tool_call(&response.content) {
+                info!("🛠️  Model requested tool: {}", tool_call.tool_name);
+
+                // 3. Execute tool
+                // Clone arguments for execution so we can still use tool_call later
+                match tool_manager.execute_tool(
+                    &tool_call.tool_name,
+                    &tool_call.function,
+                    tool_call.arguments.clone()
+                ).await {
+                    Ok(tool_result) => {
                         info!("✅ Tool execution successful");
 
-                        // For simple tool results, return directly
-                        if tool_name == "web" || tool_name == "filesystem" {
-                            return Ok(ModelResponse {
-                                content: format!("🔧 Tool Result ({}): \n\n{}", tool_name, tool_result.result),
-                                model_used: format!("Tool-{}", tool_name),
-                                tokens_used: 0,
-                                response_time_ms: 0,
-                                confidence_score: Some(1.0),
-                            });
-                        }
+                        let result_json = serde_json::to_string(&tool_result.result).unwrap_or_default();
 
-                        // For other tools, combine with AI response
-                        let enhanced_prompt = format!(
-                            "Based on this tool result: {}\n\nOriginal query: {}\n\nPlease provide a helpful response:",
-                            tool_result.result, prompt
+                        // 4. Feed back to model
+                        let tool_output = format!(
+                            "\n\nTool '{}' (function '{}') executed.\nResult: {}\n\nBased on this result, continue.",
+                            tool_call.tool_name,
+                            tool_call.function,
+                            result_json
                         );
 
-                        let mut ai_response = self.query_with_fallback(&enhanced_prompt, local_provider, cloud_providers, memory_manager, config).await?;
-                        ai_response.content = format!(
-                            "🔧 Tool Result:\n{}\n\n🤖 AI Analysis:\n{}",
-                            tool_result.result,
-                            ai_response.content
-                        );
-                        return Ok(ai_response);
+                        tool_history.push_str(&format!("\nThought: {}\nAction: {}\nObservation: {}\n",
+                            response.content, // Capture the model's thought process
+                            serde_json::to_string(&tool_call).unwrap_or_default(),
+                            result_json
+                        ));
 
-                    } else {
-                        warn!("❌ Tool execution failed: {}", tool_result.result);
-                        // Fall through to regular AI processing
+                        current_prompt.push_str(&tool_output);
+
+                        // Loop continues to next iteration to let model process the result
+                    },
+                    Err(e) => {
+                        warn!("❌ Tool execution failed: {}", e);
+                        let error_msg = format!("\n\nTool execution failed: {}\n", e);
+                        current_prompt.push_str(&error_msg);
                     }
                 }
-                Err(e) => {
-                    warn!("❌ Tool execution error: {}", e);
-                    // Fall through to regular AI processing
-                }
+            } else {
+                // No tool call detected, this is the final answer
+                info!("🏁 Final response generated");
+                return Ok(response);
             }
         }
 
-        // No tool detected or tool failed, use regular AI processing
-        self.query_with_fallback(prompt, local_provider, cloud_providers, memory_manager, config).await
+        warn!("🛑 Max ReAct steps reached");
+        // Return the last response
+        self.query_with_fallback(&current_prompt, local_provider, cloud_providers, memory_manager, config).await
+    }
+
+    fn extract_json_tool_call(&self, content: &str) -> Option<crate::tools::ToolCall> {
+        // Look for JSON block ```json ... ``` or just { ... }
+        // Simple extraction logic
+
+        let json_str = if let Some(start) = content.find("```json") {
+            if let Some(end) = content[start..].find("```") {
+                 // Determine end of block (start + len("```json") ... start + end)
+                 // Wait, find("```") returns index relative to start.
+                 // We need the *second* ``` which closes the block.
+                 // content[start..] starts with ```json.
+                 // We need to find the closing ```
+                 let code_block = &content[start+7..]; // skip ```json
+                 if let Some(end_rel) = code_block.find("```") {
+                     &code_block[..end_rel]
+                 } else {
+                     return None;
+                 }
+            } else {
+                return None;
+            }
+        } else if let Some(start) = content.find('{') {
+             if let Some(end) = content.rfind('}') {
+                 if end > start {
+                     &content[start..=end]
+                 } else {
+                     return None;
+                 }
+             } else {
+                 return None;
+             }
+        } else {
+            return None;
+        };
+
+        // Try to parse as ToolCall
+        // Expected format: {"tool": "name", "function": "func", "args": {...}}
+        #[derive(serde::Deserialize)]
+        struct RawToolCall {
+            tool: String,
+            function: String,
+            args: serde_json::Value,
+        }
+
+        if let Ok(raw) = serde_json::from_str::<RawToolCall>(json_str) {
+            Some(crate::tools::ToolCall {
+                tool_name: raw.tool,
+                function: raw.function,
+                arguments: raw.args,
+            })
+        } else {
+            None
+        }
     }
 
     /// Query with smart fallback: try local first, then cloud if needed
