@@ -36,11 +36,9 @@ impl AIAgent {
         info!("Initializing AI Agent...");
 
         // Get app data directory for database - Cross-platform
-        let app_data = dirs::data_dir()
+        let app_data = crate::utils::paths::get_air_data_dir()
             .map(|p| p.to_string_lossy().to_string())
-            .or_else(|| std::env::var("APPDATA").ok())
-            .or_else(|| std::env::var("LOCALAPPDATA").ok())
-            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
 
         // Initialize memory manager (async)
         let memory_manager = Arc::new(MemoryManager::new(&app_data).await?);
