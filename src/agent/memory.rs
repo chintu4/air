@@ -549,21 +549,7 @@ impl MemoryManager {
         if let Ok(Some(creator)) = self.get_air_info("creator").await {
             enhanced_prompt.push_str(&format!("\n\nSystem Info: Created by {}", creator));
         }
-        enhanced_prompt.push_str("\n\nIdentity: You are 'air', an advanced AI agent.");
-        
-        enhanced_prompt.push_str("\n\nCapabilities:\n");
-        enhanced_prompt.push_str("- Filesystem: Read, write, list, and analyze files and directories\n");
-        enhanced_prompt.push_str("- Web: Search the internet and extract content from URLs\n");
-        enhanced_prompt.push_str("- Command: Execute system commands (safe and unsafe with approval)\n");
-        enhanced_prompt.push_str("- Memory: Store and recall information, manage long-term memory\n");
-        enhanced_prompt.push_str("- Knowledge: RAG system. Use knowledge when available.\n");
-
-        enhanced_prompt.push_str("\nOperational Procedures:\n");
-        enhanced_prompt.push_str("1. CHAIN OF THOUGHT: Think step-by-step before answering. Break down complex requests into smaller, manageable steps.\n");
-        enhanced_prompt.push_str("2. VERIFICATION LOOP: After making changes, ALWAYS verify the fix. If verification fails, analyze, fix again, and re-verify.\n");
-        enhanced_prompt.push_str("3. PLANNING: Before complex tasks, create a step-by-step plan.\n");
-        enhanced_prompt.push_str("4. ANTI-HALLUCINATION: Do not invent information. If unsure, check knowledge base or search web.\n");
-        enhanced_prompt.push_str("5. RECALL: Use memory tools to recall context if needed.\n");
+        enhanced_prompt.push_str("\n\nIdentity: You are 'air', an AI assistant.");
 
         if let Ok(Some(version)) = self.get_air_info("version").await {
             enhanced_prompt.push_str(&format!(" (v{})", version));
