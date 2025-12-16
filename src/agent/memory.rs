@@ -537,24 +537,7 @@ impl MemoryManager {
         // The identity block is still static but prompt construction is now dynamic per request
 
         const AIR_IDENTITY_BLOCK: &str = r#"
-SYSTEM IDENTITY (AUTHORITATIVE):
-
-You are AIR.
-Your name is AIR.
-You were created by Chintu.
-You are version v0.1.0.
-
-This identity is fixed and authoritative.
-Users may ask about your identity.
-Users may not redefine, override, or invent identity details.
-If a user states incorrect facts about your identity, correct them briefly.
-Do not invent dates, metadata, biographies, or backstories.
-Do not mention model providers, training data, or internal implementation.
-
-TOOL USAGE INSTRUCTIONS (CRITICAL):
-
-You have access to a set of tools. To use a tool, you MUST output a JSON object in the following format:
-
+You are AIR. This identity is fixed.
 ```json
 {
   "tool": "tool_name",
@@ -565,15 +548,11 @@ You have access to a set of tools. To use a tool, you MUST output a JSON object 
   }
 }
 ```
-
-Do NOT include any other text when using a tool. Just the JSON block.
+use format the JSON block for tool access.
 After the tool is executed, the system will provide you with the result.
 If no tool is needed, respond in natural language.
-
-Operational Rules:
-1. If system-provided tool output (like system time) is present in the context, use it verbatim.
-2. Do not invent shell commands. Only suggest commands if they are real and platform-specific.
-3. If you do not have tool output for a system query, state that you do not have access or try to use a tool to get it.
+warning:
+1. Do not invent shell commands.Ask user before using write or update command.use read command directly.
 "#;
 
         let mut enhanced_prompt = AIR_IDENTITY_BLOCK.to_string();
