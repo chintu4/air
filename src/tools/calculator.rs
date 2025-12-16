@@ -149,15 +149,15 @@ impl Tool for CalculatorTool {
                 match self.evaluate_expression(expression) {
                     Ok(result) => Ok(ToolResult {
                         success: true,
-                        result: format!("{} = {}", expression, result),
+                        result: json!(result),
                         metadata: Some(json!({
                             "expression": expression,
-                            "result": result
+                            "formatted": format!("{} = {}", expression, result)
                         })),
                     }),
                     Err(e) => Ok(ToolResult {
                         success: false,
-                        result: format!("Calculation error: {}", e),
+                        result: json!(format!("Calculation error: {}", e)),
                         metadata: None,
                     })
                 }
@@ -172,27 +172,10 @@ impl Tool for CalculatorTool {
                 
                 let stats = self.calculate_statistics(&numbers);
                 
-                let result = format!(
-                    "Statistics for {} numbers:\n\
-                     Sum: {:.2}\n\
-                     Mean: {:.2}\n\
-                     Median: {:.2}\n\
-                     Min: {:.2}\n\
-                     Max: {:.2}\n\
-                     Std Dev: {:.2}",
-                    stats.get("count").unwrap_or(&0.0),
-                    stats.get("sum").unwrap_or(&0.0),
-                    stats.get("mean").unwrap_or(&0.0),
-                    stats.get("median").unwrap_or(&0.0),
-                    stats.get("min").unwrap_or(&0.0),
-                    stats.get("max").unwrap_or(&0.0),
-                    stats.get("std_dev").unwrap_or(&0.0)
-                );
-                
                 Ok(ToolResult {
                     success: true,
-                    result,
-                    metadata: Some(json!(stats)),
+                    result: json!(stats),
+                    metadata: None,
                 })
             }
             
@@ -203,7 +186,7 @@ impl Tool for CalculatorTool {
                 if n > 20 {
                     return Ok(ToolResult {
                         success: false,
-                        result: "Factorial too large (max 20)".to_string(),
+                        result: json!("Factorial too large (max 20)"),
                         metadata: None,
                     });
                 }
@@ -215,8 +198,8 @@ impl Tool for CalculatorTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("{}! = {}", n, result),
-                    metadata: Some(json!({"input": n, "result": result})),
+                    result: json!(result),
+                    metadata: Some(json!({"input": n, "formatted": format!("{}! = {}", n, result)})),
                 })
             }
             
@@ -229,7 +212,7 @@ impl Tool for CalculatorTool {
                 if total == 0.0 {
                     return Ok(ToolResult {
                         success: false,
-                        result: "Cannot calculate percentage of zero".to_string(),
+                        result: json!("Cannot calculate percentage of zero"),
                         metadata: None,
                     });
                 }
@@ -238,11 +221,11 @@ impl Tool for CalculatorTool {
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("{} is {:.2}% of {}", value, percentage, total),
+                    result: json!(percentage),
                     metadata: Some(json!({
                         "value": value,
                         "total": total,
-                        "percentage": percentage
+                        "formatted": format!("{} is {:.2}% of {}", value, percentage, total)
                     })),
                 })
             }
@@ -265,19 +248,19 @@ impl Tool for CalculatorTool {
                     ("pounds", "kg") => value / 2.20462,
                     _ => return Ok(ToolResult {
                         success: false,
-                        result: format!("Conversion from {} to {} not supported", from_unit, to_unit),
+                        result: json!(format!("Conversion from {} to {} not supported", from_unit, to_unit)),
                         metadata: None,
                     })
                 };
                 
                 Ok(ToolResult {
                     success: true,
-                    result: format!("{} {} = {:.4} {}", value, from_unit, result, to_unit),
+                    result: json!(result),
                     metadata: Some(json!({
                         "input_value": value,
                         "from_unit": from_unit,
                         "to_unit": to_unit,
-                        "result": result
+                        "formatted": format!("{} {} = {:.4} {}", value, from_unit, result, to_unit)
                     })),
                 })
             }
