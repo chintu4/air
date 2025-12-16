@@ -20,9 +20,7 @@ impl EmbeddingModel {
         let _revision = "refs/pr/21";
 
         // Set explicit cache path to avoid environment issues
-        let mut cache_path = std::env::current_dir()?;
-        cache_path.push(".air");
-        cache_path.push("cache");
+        let cache_path = crate::utils::paths::get_air_data_dir()?.join("cache");
 
         let api = ApiBuilder::new()
             .with_cache_dir(cache_path)

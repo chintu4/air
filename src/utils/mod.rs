@@ -1,1 +1,2 @@
-use doc;
+pub mod doc;
+pub mod paths;

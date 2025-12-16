@@ -32,6 +32,7 @@ pub mod models;
 pub mod providers;
 pub mod tools;
 pub mod rag;
+pub mod utils;
 
 // Re-export commonly used types for convenience
 pub use agent::AIAgent;

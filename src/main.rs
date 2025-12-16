@@ -58,8 +58,8 @@ enum MemoryCommands {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load environment variables from AppData .env file
-    if let Some(config_dir) = dirs::config_dir() {
-        let env_path = config_dir.join("air").join(".env");
+    if let Ok(air_dir) = air::utils::paths::get_air_data_dir() {
+        let env_path = air_dir.join(".env");
         if env_path.exists() {
             dotenv::from_path(env_path).ok();
         }
@@ -272,13 +272,7 @@ async fn handle_login() -> Result<()> {
     }
 
     // Determine config directory
-    let config_dir = dirs::config_dir().ok_or(anyhow::anyhow!("Could not find config directory"))?;
-    let air_dir = config_dir.join("air");
-
-    if !air_dir.exists() {
-        std::fs::create_dir_all(&air_dir)?;
-    }
-
+    let air_dir = air::utils::paths::get_air_data_dir()?;
     let env_path = air_dir.join(".env");
     let mut env_content = String::new();
 
@@ -321,8 +315,8 @@ async fn handle_local_setup() -> Result<()> {
     println!("This will help you set up a GGUF model for local inference.");
 
     // Check for models directory
-    let home_dir = dirs::home_dir().ok_or(anyhow::anyhow!("Could not find home directory"))?;
-    let models_dir = home_dir.join(".air").join("models");
+    let air_dir = air::utils::paths::get_air_data_dir()?;
+    let models_dir = air_dir.join("models");
 
     if !models_dir.exists() {
         std::fs::create_dir_all(&models_dir)?;
@@ -497,14 +491,7 @@ async fn run_interactive_mode(agent: AIAgent) -> Result<()> {
 // --- Model Selection Helpers ---
 
 fn save_config(config: &Config) -> Result<()> {
-    let app_data = dirs::data_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .or_else(|| std::env::var("APPDATA").ok())
-        .or_else(|| std::env::var("LOCALAPPDATA").ok())
-        .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
-
-    let config_dir = PathBuf::from(app_data).join("air");
-    std::fs::create_dir_all(&config_dir)?;
+    let config_dir = air::utils::paths::get_air_data_dir()?;
     let config_path = config_dir.join("config.toml");
 
     let toml_string = toml::to_string_pretty(config)?;
@@ -529,9 +516,9 @@ fn scan_for_models(config: &Config) -> Vec<PathBuf> {
         search_dirs.push(PathBuf::from(r"C:\models"));
     }
 
-    // 3. ~/.air/models
-    if let Some(home) = dirs::home_dir() {
-        search_dirs.push(home.join(".air").join("models"));
+    // 3. App Data Models
+    if let Ok(air_dir) = air::utils::paths::get_air_data_dir() {
+        search_dirs.push(air_dir.join("models"));
     }
 
     // 4. Current dir models
@@ -598,7 +585,7 @@ fn ensure_model_selected(config: &mut Config) -> Result<()> {
     if models.is_empty() {
         println!("⚠️  No local models (GGUF) found.");
         println!("   Please run 'air setup --local' to download a model,");
-        println!("   or place your .gguf files in C:\\models or ~/.air/models.");
+        println!("   or place your .gguf files in C:\\models or the 'models' folder in your data directory.");
         return Ok(());
     }
 

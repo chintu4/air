@@ -14,11 +14,9 @@ pub struct KnowledgeTool {
 
 impl KnowledgeTool {
     pub async fn new() -> Result<Self> {
-        let app_data = dirs::data_dir()
+        let app_data = crate::utils::paths::get_air_data_dir()
             .map(|p| p.to_string_lossy().to_string())
-            .or_else(|| std::env::var("APPDATA").ok())
-            .or_else(|| std::env::var("LOCALAPPDATA").ok())
-            .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().to_string());
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().to_string());
 
         let store = match KnowledgeStore::new(&app_data).await {
             Ok(s) => Some(Arc::new(s)),

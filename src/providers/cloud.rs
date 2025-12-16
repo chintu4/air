@@ -266,7 +266,9 @@ impl GeminiProvider {
     }
 
     fn get_cache_file_path(&self) -> Option<PathBuf> {
-        dirs::cache_dir().map(|d| d.join("air").join("gemini_models.json"))
+        crate::utils::paths::get_air_data_dir()
+            .ok()
+            .map(|d| d.join("cache").join("gemini_models.json"))
     }
 
     async fn fetch_and_sort_models(&self, api_key: &str) -> Result<Vec<String>> {

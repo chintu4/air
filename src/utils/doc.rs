@@ -86,6 +86,9 @@ fn show_help() {
     println!("═══════════════════════════════════════════════════════════════════");
 }
 
+use crate::agent::AIAgent;
+use anyhow::Result;
+
 async fn show_stats(_agent: &AIAgent) -> Result<()> {
     println!("\n📊 air Usage Statistics:");
     println!("════════════════════════");
