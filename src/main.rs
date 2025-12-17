@@ -162,6 +162,7 @@ async fn handle_config_mode() -> Result<()> {
             format!("Local Model: {} [{}]", local_model_name, local_status),
             format!("Set Local Timeout (Current: {}s)", config.performance.local_timeout_seconds),
             format!("Change Local Model File"),
+            format!("Local Inference Device: {}", config.local_model.device),
         ];
 
         // Cloud providers
@@ -218,9 +219,17 @@ async fn handle_config_mode() -> Result<()> {
                              prompt_model_selection(&mut config, &models)?;
                          }
                     }
+                    4 => { // Change Local Inference Device
+                         let devices = vec!["cuda", "cpu", "metal", "auto"];
+                         let selection = Select::new("Select inference device:", devices).prompt();
+                         if let Ok(device) = selection {
+                             config.local_model.device = device.to_string();
+                             println!("✅ Device updated to {}", device);
+                         }
+                    }
                     _ => { // Toggle Cloud Provider
-                        // Cloud providers start at index 4
-                        let provider_idx = index - 4;
+                        // Cloud providers start at index 5
+                        let provider_idx = index - 5;
                         if let Some(provider) = config.cloud_providers.get_mut(provider_idx) {
                              provider.enabled = !provider.enabled;
                         }
