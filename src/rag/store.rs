@@ -61,19 +61,26 @@ impl<E: Embedder + Send + Sync + 'static> KnowledgeStore<E> {
                         let mut embs = store.embeddings.lock().await;
 
                         let mut new_docs = Vec::new();
-                        let mut new_texts = Vec::new();
+                        let mut new_embeddings = Vec::new();
 
                         for s in serialized {
+                            // Extract embedding before moving s
+                            let embedding = s.embedding.clone();
                             let doc: Document = s.into();
-                            new_docs.push(doc.clone());
-                            new_texts.push(doc.page_content);
+                            new_docs.push(doc);
+
+                            // CHANGE: Load cached embedding instead of re-calculating
+                            if let Some(emb) = embedding {
+                                new_embeddings.push(emb);
+                            } else {
+                                // Fallback for old files without embeddings
+                                let e = store.embedder.embed_query(&new_docs.last().unwrap().page_content).await.unwrap_or_default();
+                                new_embeddings.push(e);
+                            }
                         }
 
-                        // Re-embed on load (since we don't save embeddings to keep file small)
-                        let embeddings_result = store.embedder.embed_documents(&new_texts).await.map_err(|e| anyhow::anyhow!("Embedding failed: {:?}", e))?;
-
                         *docs = new_docs;
-                        *embs = embeddings_result;
+                        *embs = new_embeddings;
                     }
                 }
             }
@@ -130,10 +137,16 @@ impl<E: Embedder + Send + Sync + 'static> KnowledgeStore<E> {
 
     async fn save(&self) -> Result<()> {
         let docs = self.documents.lock().await;
-        let serialized_docs: Vec<SerializedDocument> = docs.iter().map(|d| SerializedDocument::from(d.clone())).collect();
+        let embs = self.embeddings.lock().await; // Lock embeddings too
+
+        // CHANGE: Zip docs with embeddings for serialization
+        let serialized_docs: Vec<SerializedDocument> = docs.iter()
+            .zip(embs.iter())
+            .map(|(d, e)| SerializedDocument::from_doc_and_emb(d.clone(), e.clone()))
+            .collect();
+
         let content = serde_json::to_string(&serialized_docs)?;
 
-        // Compress data
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(content.as_bytes())?;
         let compressed_data = encoder.finish()?;
@@ -159,17 +172,21 @@ fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
 struct SerializedDocument {
     page_content: String,
     metadata: HashMap<String, serde_json::Value>,
+    // CHANGE: Add embedding field
+    embedding: Option<Vec<f64>>,
 }
 
-impl From<Document> for SerializedDocument {
-    fn from(doc: Document) -> Self {
+impl SerializedDocument {
+    fn from_doc_and_emb(doc: Document, emb: Vec<f64>) -> Self {
         Self {
             page_content: doc.page_content,
             metadata: doc.metadata,
+            embedding: Some(emb),
         }
     }
 }
 
+// Update From implementation to handle missing embedding (backward compatibility)
 impl From<SerializedDocument> for Document {
     fn from(val: SerializedDocument) -> Self {
         Document::new(val.page_content).with_metadata(val.metadata)
