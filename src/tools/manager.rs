@@ -1,4 +1,4 @@
-use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool, KnowledgeTool, SystemTool};
+use super::{Tool, ToolResult, FileSystemTool, CalculatorTool, MemoryTool, PlannerTool, WebTool, CommandTool, ScreenshotTool, VoiceTool, KnowledgeTool, SystemTool, NewsTool};
 use anyhow::Result;
 use std::sync::Arc;
 use tracing::{info, debug};
@@ -14,6 +14,7 @@ pub struct ToolManager {
     voice: Arc<dyn Tool>,
     knowledge: Arc<dyn Tool>,
     system: Arc<dyn Tool>,
+    news: Arc<dyn Tool>,
 }
 
 impl ToolManager {
@@ -38,6 +39,7 @@ impl ToolManager {
                 panic!("KnowledgeTool::new() should not fail")
             })),
             system: Arc::new(SystemTool::new()),
+            news: Arc::new(NewsTool::new()),
         }
     }
     
@@ -53,6 +55,7 @@ impl ToolManager {
             &self.voice,
             &self.knowledge,
             &self.system,
+            &self.news,
         ];
 
         let definitions: Vec<serde_json::Value> = tools.iter().map(|tool| {
@@ -81,6 +84,7 @@ impl ToolManager {
             "voice" => &self.voice,
             "knowledge" => &self.knowledge,
             "system" => &self.system,
+            "WebScraper" => &self.news,
             _ => return Err(anyhow::anyhow!("Unknown tool: {}", tool_name)),
         };
         

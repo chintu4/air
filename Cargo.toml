@@ -48,6 +48,7 @@ mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", version = 
 indexmap = "2.12.1"
 inquire = "0.7"
 sysinfo = "0.30"
+scraper = "0.25.0"
 
 [dev-dependencies]
 tempfile = "3.8"
