@@ -552,6 +552,10 @@ You: { "tool": "read_file", "args": { "path": "Cargo.toml" } }
 Example 3:
 User: Go to rust-lang.org and get the content.
 You: { "tool": "web_fetch", "args": { "url": "https://www.rust-lang.org" } }
+
+Example 4:
+User: What are the top news headlines?
+You: { "tool": "WebScraper", "function": "scrape_news", "args": { "max_articles": 10 } }
 "#;
 
             // Limit history to 1 turn for small models
